@@ -31,18 +31,18 @@ def print_report(ticker: str):
 
     print()
     print(divider("═"))
-    print(ORANGE + BOLD + f"  {'STOCK REPORT':^{CARD_WIDTH - 4}}" + RESET)
+    print(ORANGE + BOLD + f"  {'股票分析報告':^{CARD_WIDTH - 6}}" + RESET)
     print(divider("═"))
     print(WHITE + BOLD + f"  {name}" + RESET)
     print(GRAY  + f"  {ticker.upper()}  ·  {currency}" + RESET)
     print(divider())
-    print(WHITE + f"  {'Current Price':<22}" + ORANGE + BOLD + f"{fmt(price):>22}" + RESET)
-    print(WHITE + f"  {'52-Week High':<22}" + WHITE  + f"{fmt(week52_high):>22}" + RESET)
-    print(WHITE + f"  {'52-Week Low':<22}" + WHITE  + f"{fmt(week52_low):>22}" + RESET)
+    print(WHITE + f"  {'現價':<24}" + ORANGE + BOLD + f"{fmt(price):>20}" + RESET)
+    print(WHITE + f"  {'52週最高':<23}" + WHITE  + f"{fmt(week52_high):>20}" + RESET)
+    print(WHITE + f"  {'52週最低':<23}" + WHITE  + f"{fmt(week52_low):>20}" + RESET)
     print(divider("═"))
     print()
 
 
 if __name__ == "__main__":
-    ticker = sys.argv[1] if len(sys.argv) > 1 else input("Enter ticker symbol: ")
+    ticker = sys.argv[1] if len(sys.argv) > 1 else input("請輸入股票代號: ")
     print_report(ticker)
