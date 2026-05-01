@@ -26,14 +26,20 @@ W, H = A4  # 595 x 842 pt
 def _register_cjk_font():
     """Try to register a CJK font; fall back to Helvetica if none found."""
     candidates = [
-        # Linux common paths
+        # Windows — 微軟正黑體（繁體中文內建字型，優先使用）
+        "C:/Windows/Fonts/msjh.ttc",
+        "C:/Windows/Fonts/msjhbd.ttc",
+        "C:/Windows/Fonts/mingliu.ttc",
+        "C:/Windows/Fonts/kaiu.ttf",
+        # Linux
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/arphic/uming.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/arphic/uming.ttc",
         # macOS
         "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
         "/Library/Fonts/Arial Unicode MS.ttf",
     ]
     for path in candidates:
