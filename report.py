@@ -35,15 +35,17 @@ HEX = dict(
 C = {k: colors.HexColor(v) for k, v in HEX.items()}
 
 PW, PH = A4
-M   = 14 * mm
-HDR = 13 * mm
-FTR =  8 * mm
+M   = 9 * mm       # 25 pt margins (was 14 mm / ~40 pt)
+HDR = 11 * mm
+FTR =  6 * mm
 CW  = PW - 2 * M
 CT  = PH - M - HDR
 CB  = M  + FTR
 CH  = CT - CB
 TODAY = datetime.today().strftime("%Y-%m-%d")
 TOTAL_PAGES = 18
+FS  = 0.85          # global font scale — 15% smaller
+GAP = 2 * mm        # halved inter-card column gap
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FONT  (Windows msjh.ttc first, then Linux / macOS fallbacks)
@@ -397,43 +399,86 @@ def make_radar(scores):
     fig.tight_layout()
     return fig
 
-def _make_price_chart_internal(df, lookback, ma_short, ma_long, ma_extra, sup, res, title):
+def _candlestick_chart(df, lookback, ma_short, ma_long, ma_extra, sup, res, title):
+    """K-line (candlestick) chart with MA, S/R dashes and auto trend lines."""
     sub = df.tail(lookback).copy()
     if len(sub) < 5: return None
     plt.rcParams.update(_MRC)
-    fig = plt.figure(figsize=(10, 5.5), facecolor=HEX["bg"])
-    gs2 = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[3, 1], hspace=0.06)
+    fig = plt.figure(figsize=(10, 5.8), facecolor=HEX["bg"])
+    gs2 = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[3, 1], hspace=0.05)
     ax1 = fig.add_subplot(gs2[0])
     ax2 = fig.add_subplot(gs2[1], sharex=ax1)
     ax1.set_facecolor(HEX["card"]); ax2.set_facecolor(HEX["card"])
-    n   = len(sub); dates = list(range(n))
-    close = sub["Close"].values
-    ax1.plot(dates, close, color=HEX["white"], lw=1.2, label="收盤價")
+    n = len(sub)
+    opens  = sub["Open"].values
+    highs  = sub["High"].values
+    lows   = sub["Low"].values
+    closes = sub["Close"].values
+
+    # ── Candlestick bodies + wicks ──────────────────────────────────────
+    for i in range(n):
+        up = closes[i] >= opens[i]
+        col = HEX["green"] if up else HEX["red"]
+        ax1.plot([i, i], [lows[i], highs[i]], color=col, lw=0.7, zorder=2)
+        body_lo = min(opens[i], closes[i])
+        body_hi = max(opens[i], closes[i])
+        ax1.bar(i, max(body_hi - body_lo, highs[i]*0.001),
+                bottom=body_lo, color=col, width=0.65, alpha=0.92, zorder=3)
+
+    # ── MA lines ────────────────────────────────────────────────────────
     if n >= ma_short:
         ms = sub["Close"].rolling(ma_short).mean().values
-        ax1.plot(dates, ms, color=HEX["orange"], lw=1.1, label=f"MA{ma_short}")
+        ax1.plot(range(n), ms, color=HEX["orange"], lw=1.1, label=f"MA{ma_short}", zorder=4)
     if n >= ma_long:
         ml = sub["Close"].rolling(ma_long).mean().values
-        ax1.plot(dates, ml, color=HEX["white"], lw=0.9, ls="--", alpha=0.7, label=f"MA{ma_long}")
+        ax1.plot(range(n), ml, color=HEX["white"], lw=0.85, ls="--",
+                 alpha=0.7, label=f"MA{ma_long}", zorder=4)
     if ma_extra and n >= ma_extra:
         me = sub["Close"].rolling(ma_extra).mean().values
-        ax1.plot(dates, me, color=HEX["yellow"], lw=1, alpha=0.85, label=f"MA{ma_extra}")
+        ax1.plot(range(n), me, color=HEX["yellow"], lw=0.95,
+                 alpha=0.85, label=f"MA{ma_extra}", zorder=4)
+
+    # ── S/R horizontal dashes ────────────────────────────────────────────
     for r in (res or [])[-2:]:
-        ax1.axhline(r, color=HEX["red"], ls="--", lw=0.8, alpha=0.75)
-        ax1.text(n-1, r, f" {r:.2f}", color=HEX["red"], fontsize=6.5, va="bottom")
+        ax1.axhline(r, color=HEX["red"], ls="--", lw=0.75, alpha=0.75)
+        ax1.text(n - 0.5, r, f" {r:.2f}", color=HEX["red"], fontsize=6, va="bottom")
     for s in (sup or [])[-2:]:
-        ax1.axhline(s, color=HEX["green"], ls="--", lw=0.8, alpha=0.75)
-        ax1.text(n-1, s, f" {s:.2f}", color=HEX["green"], fontsize=6.5, va="top")
-    ax1.legend(fontsize=7, loc="upper left",
+        ax1.axhline(s, color=HEX["green"], ls="--", lw=0.75, alpha=0.75)
+        ax1.text(n - 0.5, s, f" {s:.2f}", color=HEX["green"], fontsize=6, va="top")
+
+    # ── Auto trend lines ────────────────────────────────────────────────
+    pn = max(3, n // 10)
+    # Uptrend: linear fit through pivot lows (connect recent lows → green solid)
+    lo_idx = [i for i in range(pn, n - pn)
+              if all(lows[i] <= lows[i-pn:i]) and all(lows[i] <= lows[i+1:i+pn+1])]
+    if len(lo_idx) >= 2:
+        xp = np.array(lo_idx[-5:], dtype=float)
+        yp = lows[lo_idx[-5:]]
+        cf = np.polyfit(xp, yp, 1)
+        x0, x1 = xp[0], float(n - 1)
+        ax1.plot([x0, x1], [np.polyval(cf, x0), np.polyval(cf, x1)],
+                 color=HEX["green"], lw=1.3, ls="-", alpha=0.85, zorder=5, label="上升趨勢")
+    # Downtrend: linear fit through pivot highs (connect recent highs → red solid)
+    hi_idx = [i for i in range(pn, n - pn)
+              if all(highs[i] >= highs[i-pn:i]) and all(highs[i] >= highs[i+1:i+pn+1])]
+    if len(hi_idx) >= 2:
+        xp = np.array(hi_idx[-5:], dtype=float)
+        yp = highs[hi_idx[-5:]]
+        cf = np.polyfit(xp, yp, 1)
+        x0, x1 = xp[0], float(n - 1)
+        ax1.plot([x0, x1], [np.polyval(cf, x0), np.polyval(cf, x1)],
+                 color=HEX["red"], lw=1.3, ls="-", alpha=0.85, zorder=5, label="下降趨勢")
+
+    ax1.legend(fontsize=6.5, loc="upper left",
                facecolor=HEX["card2"], labelcolor=HEX["white"], framealpha=0.8)
-    ax1.set_ylabel("價格", fontsize=8, color=HEX["gray"]); ax1.grid(True, alpha=0.3)
-    if title: ax1.set_title(title, color=HEX["white"], fontsize=9, pad=4)
-    vol = sub["Volume"].values
-    vc  = [HEX["green"] if sub["Close"].values[i] >= sub["Open"].values[i]
-           else HEX["red"] for i in range(n)]
-    ax2.bar(dates, vol, color=vc, alpha=0.7)
+    ax1.set_ylabel("價格", fontsize=7, color=HEX["gray"]); ax1.grid(True, alpha=0.25)
+    if title: ax1.set_title(title, color=HEX["white"], fontsize=9, pad=3)
+
+    # ── Volume bars ──────────────────────────────────────────────────────
+    vc = [HEX["green"] if closes[i] >= opens[i] else HEX["red"] for i in range(n)]
+    ax2.bar(range(n), sub["Volume"].values, color=vc, alpha=0.7)
     ax2.set_ylabel("成交量", fontsize=7, color=HEX["gray"]); ax2.grid(True, alpha=0.2)
-    step = max(1, n // 6)
+    step  = max(1, n // 6)
     ticks = list(range(0, n, step))
     tlbls = [sub.index[i].strftime("%m/%d") if hasattr(sub.index[i], "strftime")
              else "" for i in ticks]
@@ -443,13 +488,13 @@ def _make_price_chart_internal(df, lookback, ma_short, ma_long, ma_extra, sup, r
     return fig
 
 def make_daily_chart(df, sup, res):
-    return _make_price_chart_internal(df, 63, 20, 50, None, sup, res, "日線圖（近3個月）")
+    return _candlestick_chart(df, 63, 20, 50, None, sup, res, "日線圖（近3個月）K線")
 
 def make_weekly_chart(df, sup, res):
-    return _make_price_chart_internal(df, 52, 20, 50, 200, sup, res, "週線圖（近1年）")
+    return _candlestick_chart(df, 52, 20, 50, 200, sup, res, "週線圖（近1年）K線")
 
 def make_monthly_chart(df, sup, res):
-    return _make_price_chart_internal(df, 36, 12, 24, None, sup, res, "月線圖（近3年）")
+    return _candlestick_chart(df, 36, 12, 24, None, sup, res, "月線圖（近3年）K線")
 
 def make_obv_chart(df, lookback=63):
     sub = df.tail(lookback).copy()
@@ -558,12 +603,12 @@ def _card(c, x, y, w, h, fill="card", r=5):
     c.setFillColor(C[fill]); c.roundRect(x, y, w, h, r, stroke=0, fill=1)
 
 def _txt(c, s, x, y, size=9, col="white", align="l"):
-    c.setFont(RL_FONT, size); c.setFillColor(C[col]); s = str(s)
+    c.setFont(RL_FONT, max(6, round(size * FS))); c.setFillColor(C[col]); s = str(s)
     {"c": c.drawCentredString, "r": c.drawRightString}.get(align, c.drawString)(x, y, s)
 
 def _section(c, title, y):
-    c.setFillColor(C["orange"]); c.roundRect(M, y, 3, 13, 1, stroke=0, fill=1)
-    _txt(c, title, M+7, y+1, size=11, col="white")
+    c.setFillColor(C["orange"]); c.roundRect(M, y, 3, 11, 1, stroke=0, fill=1)
+    _txt(c, title, M+6, y+1, size=10, col="white")
 
 def _scorebar(c, x, y, w, score, h=5, col=None):
     if col is None:
@@ -705,8 +750,8 @@ def p03(c, sd, ov, rec, rc, dcf_fair, pe_base, evs_base):
     _section(c, "投資論點摘要  Investment Thesis", CT - 8*mm)
 
     # ── Three horizontal cards ───────────────────────────────────────────
-    cw3 = (CW - 8*mm) / 3; ch = 58*mm
-    cy  = CT - 8*mm - 16*mm - ch
+    cw3 = (CW - GAP*2) / 3; ch = 60*mm
+    cy  = CT - 6*mm - 14*mm - ch
 
     price = sd.price or 0
     cands = [v for v in [dcf_fair, pe_base, evs_base] if v]
@@ -734,12 +779,12 @@ def p03(c, sd, ov, rec, rc, dcf_fair, pe_base, evs_base):
         ]),
     ]
     for i, (title, col, items) in enumerate(cards3):
-        cx = M + i * (cw3 + 4*mm)
+        cx = M + i * (cw3 + GAP)
         _card(c, cx, cy, cw3, ch, fill="card")
         c.setFillColor(C[col]); c.roundRect(cx, cy+ch-10*mm, cw3, 10*mm, 5, stroke=0, fill=1)
         _txt(c, title, cx+cw3/2, cy+ch-6.5*mm, size=9, col="white", align="c")
         for j, item in enumerate(items):
-            _txt(c, item, cx+3*mm, cy+ch-15*mm - j*7.5*mm, size=7.5, col="white")
+            _txt(c, item, cx+3*mm, cy+ch-15*mm - j*8*mm, size=7.5, col="white")
 
     # ── Valuation Range Bar ──────────────────────────────────────────────
     vy = cy - 22*mm
@@ -835,12 +880,12 @@ def p04(c, sd, rsi_val, perf52):
     ]
 
     # Three columns
-    cw3 = (CW - 8*mm) / 3; ch = 65*mm
-    col_y = CT - 8*mm - 16*mm - ch
+    cw3 = (CW - GAP*2) / 3; ch = 68*mm
+    col_y = CT - 6*mm - 14*mm - ch
     cols = [("Bull Thesis","green",bull_pts), ("Bear Thesis","red",bear_pts),
             ("Key Confirmations","blue",conf_pts)]
     for i, (title, col, pts) in enumerate(cols):
-        cx = M + i * (cw3 + 4*mm)
+        cx = M + i * (cw3 + GAP)
         _card(c, cx, col_y, cw3, ch, fill="card")
         c.setFillColor(C[col]); c.roundRect(cx, col_y+ch-10*mm, cw3, 10*mm, 5, stroke=0, fill=1)
         _txt(c, title, cx+cw3/2, col_y+ch-6.5*mm, size=9, col="white", align="c")
@@ -985,11 +1030,11 @@ def _val_page_header(c, sd, pg, main_title, subtitle):
 def _scenario_cards(c, sd, bear, base, bull, y):
     """Bear / Base / Bull scenario cards row."""
     price = sd.price or 0
-    sw = (CW - 8*mm) / 3
+    sw = (CW - GAP*2) / 3
     for i, (label, val, col) in enumerate([("Bear 悲觀", bear, "red"),
                                             ("Base 基本", base, "white"),
                                             ("Bull 樂觀", bull, "green")]):
-        sx = M + i * (sw + 4*mm)
+        sx = M + i * (sw + GAP)
         _card(c, sx, y, sw, 28*mm, fill="card")
         c.setFillColor(C[col]); c.roundRect(sx, y+18*mm, sw, 10*mm, 4, stroke=0, fill=1)
         _txt(c, label, sx+sw/2, y+23*mm, size=8.5, col="white", align="c")
@@ -1053,9 +1098,9 @@ def p06(c, sd, dcf_fair, wacc, tgr):
     # Scenario analysis
     _txt(c, "情境分析（調整FCF成長假設）", rx, ry, size=9, col="orange")
     ry -= 10*mm
-    sw = (rw - 8*mm) / 3
+    sw = (rw - GAP*2) / 3
     for i, (scen, mult) in enumerate([("Bear -30%", 0.70), ("Base", 1.00), ("Bull +30%", 1.30)]):
-        sx = rx + i*(sw+4*mm)
+        sx = rx + i*(sw+GAP)
         fv = (dcf_fair * mult) if dcf_fair else None
         col = "red" if i==0 else "white" if i==1 else "green"
         _card(c, sx, ry-22*mm, sw, 22*mm, fill="card")
@@ -1073,34 +1118,39 @@ def p07(c, sd, tpe, pe_bear, pe_base, pe_bull):
                      "以預期每股盈利（EPS）與目標市盈率計算目標股價")
 
     price = sd.price
+    aw = CW * 0.44; ay_top = CT - 20*mm
+    assump_h = 55*mm
+    assump_y = ay_top - 8*mm - assump_h   # bottom of assump card
 
-    aw = CW * 0.44; ay_top = CT - 22*mm
+    # LEFT: data card
     _txt(c, "PE 數據概覽", M, ay_top, size=10, col="orange")
-    _assump_card(c, M, ay_top - 10*mm - 55*mm, aw, 55*mm, [
-        ("Trailing EPS",   fn(sd.eps_trail)),
-        ("Forward EPS",    fn(sd.eps_fwd)),
-        ("Trailing PE",    fn(sd.pe_trail)),
-        ("Forward PE",     fn(sd.pe_fwd)),
+    _assump_card(c, M, assump_y, aw, assump_h, [
+        ("Trailing EPS",         fn(sd.eps_trail)),
+        ("Forward EPS",          fn(sd.eps_fwd)),
+        ("Trailing PE",          fn(sd.pe_trail)),
+        ("Forward PE",           fn(sd.pe_fwd)),
         ("Target PE（用於估值）", fn(tpe)),
-        ("PEG Ratio",      fn(sd.peg)),
+        ("PEG Ratio",            fn(sd.peg)),
     ])
 
-    # Scenario cards
-    rw = CW * 0.50; rx = M + aw + 6*mm
+    # RIGHT: scenario cards (same top, shorter — fits above assump card bottom)
+    rw = CW * 0.50; rx = M + aw + GAP * 3
     _txt(c, "目標股價（情境）", rx, ay_top, size=10, col="orange")
-    _scenario_cards(c, sd, pe_bear, pe_base, pe_bull, ay_top - 10*mm - 28*mm)
+    _scenario_cards(c, sd, pe_bear, pe_base, pe_bull, ay_top - 8*mm - 28*mm)
 
-    # PE vs current comparison
-    comp_y = ay_top - 10*mm - 28*mm - 15*mm
-    _txt(c, "PE 比較分析", M, comp_y, size=10, col="orange")
-    comp_y -= 10*mm
-    cw2 = (CW - 4*mm) / 2
-    for cx, (title, val, note) in [(M, ("Trailing PE", fn(sd.pe_trail), "過去12月盈利")),
-                                    (M+cw2+4*mm, ("Forward PE", fn(sd.pe_fwd), "未來12月預估"))]:
-        _card(c, cx, comp_y-22*mm, cw2, 22*mm, fill="card")
-        _txt(c, title, cx+cw2/2, comp_y-4*mm,  size=8.5, col="gray",  align="c")
-        _txt(c, val,   cx+cw2/2, comp_y-14*mm, size=16,  col="white", align="c")
-        _txt(c, note,  cx+cw2/2, comp_y-20*mm, size=7,   col="gray",  align="c")
+    # BELOW BOTH: PE comparison cards anchored below the taller assump card
+    comp_y = assump_y - 8*mm
+    _txt(c, "PE 比較分析（Trailing vs Forward）", M, comp_y, size=10, col="orange")
+    comp_y -= 8*mm
+    cw2 = (CW - GAP) / 2
+    for i, (cx, title, val, note) in enumerate([
+        (M,          "Trailing PE", fn(sd.pe_trail), "過去12月實際盈利"),
+        (M+cw2+GAP,  "Forward PE",  fn(sd.pe_fwd),  "未來12月預估盈利"),
+    ]):
+        _card(c, cx, comp_y - 24*mm, cw2, 24*mm, fill="card")
+        _txt(c, title, cx+cw2/2, comp_y-4.5*mm, size=8.5, col="gray",  align="c")
+        _txt(c, val,   cx+cw2/2, comp_y-15*mm,  size=18,  col="white", align="c")
+        _txt(c, note,  cx+cw2/2, comp_y-22*mm,  size=7,   col="gray",  align="c")
 
     _ftr(c)
 
@@ -1113,39 +1163,55 @@ def p08(c, sd, ind_avg, evs_bear, evs_base, evs_bull):
 
     price   = sd.price
     cur_evs = sd.ev_sales
+    aw = CW * 0.44; ay_top = CT - 20*mm
+    assump_h = 50*mm
+    assump_y = ay_top - 8*mm - assump_h   # bottom of assump card
 
-    aw = CW * 0.44; ay_top = CT - 22*mm
+    # LEFT: data card
     _txt(c, "EV/Sales 數據", M, ay_top, size=10, col="orange")
-    _assump_card(c, M, ay_top - 10*mm - 50*mm, aw, 50*mm, [
-        ("企業價值（EV）",        fc(sd.ev)),
-        ("總收入（Revenue）",     fc(sd.revenue)),
-        ("EV/Sales（現值）",      fn(cur_evs)),
-        ("EV/Sales（行業估算）",  fn(ind_avg)),
-        ("收入年增率",            fp(sd.rev_gr)),
-        ("流通股數",              fc(sd.shares)),
+    _assump_card(c, M, assump_y, aw, assump_h, [
+        ("企業價值（EV）",       fc(sd.ev)),
+        ("總收入（Revenue）",    fc(sd.revenue)),
+        ("EV/Sales（現值）",     fn(cur_evs)),
+        ("EV/Sales（行業估算）", fn(ind_avg)),
+        ("收入年增率",           fp(sd.rev_gr)),
+        ("流通股數",             fc(sd.shares)),
     ])
 
-    rw = CW * 0.50; rx = M + aw + 6*mm
+    # RIGHT: scenario cards
+    rw = CW * 0.50; rx = M + aw + GAP * 3
     _txt(c, "目標股價（情境）", rx, ay_top, size=10, col="orange")
-    _scenario_cards(c, sd, evs_bear, evs_base, evs_bull, ay_top - 10*mm - 28*mm)
+    _scenario_cards(c, sd, evs_bear, evs_base, evs_bull, ay_top - 8*mm - 28*mm)
 
-    # EV/Sales gauge
-    gauge_y = ay_top - 10*mm - 28*mm - 15*mm
-    _txt(c, "EV/Sales 相對估值", M, gauge_y, size=10, col="orange")
-    gauge_y -= 10*mm
+    # BELOW BOTH: gauge anchored below the taller assump card
+    gauge_y = assump_y - 8*mm
+    _txt(c, "EV/Sales 相對估值（當前 vs 行業均值）", M, gauge_y, size=10, col="orange")
+    gauge_y -= 8*mm
     if cur_evs is not None and ind_avg is not None:
-        bar_w = CW; lo = 0; hi = max(cur_evs, ind_avg) * 1.5 or 10
-        brange = hi - lo or 1
+        bar_w = CW; hi = max(cur_evs, ind_avg) * 1.6 or 10
+        brange = hi or 1
         c.setFillColor(C["card"]); c.roundRect(M, gauge_y-5*mm, bar_w, 8*mm, 4, stroke=0, fill=1)
-        # current
-        fw = bar_w * cur_evs / brange
+        fw = min(bar_w, bar_w * cur_evs / brange)
         c.setFillColor(C["orange"]); c.roundRect(M, gauge_y-5*mm, fw, 8*mm, 4, stroke=0, fill=1)
-        # industry line
         lx = M + bar_w * ind_avg / brange
         c.setStrokeColor(C["white"]); c.setLineWidth(1.5)
-        c.line(lx, gauge_y-7*mm, lx, gauge_y+5*mm)
-        _txt(c, f"現值 {fn(cur_evs)}x", M+fw/2, gauge_y-12*mm, size=7.5, col="orange", align="c")
-        _txt(c, f"行業均值 {fn(ind_avg)}x", lx, gauge_y+7*mm, size=7.5, col="white", align="c")
+        c.line(lx, gauge_y-7*mm, lx, gauge_y+6*mm)
+        _txt(c, f"現值 {fn(cur_evs)}x", M + fw/2, gauge_y - 13*mm, size=7.5, col="orange", align="c")
+        _txt(c, f"行業均值 {fn(ind_avg)}x", lx, gauge_y + 8*mm, size=7.5, col="white", align="c")
+
+        # Three interpretation cards below gauge
+        interp_y = gauge_y - 20*mm
+        iw = (CW - GAP*2) / 3
+        under = cur_evs < ind_avg
+        for i, (ititle, itext, icol) in enumerate([
+            ("相對估值", "低估" if under else "高估", "green" if under else "red"),
+            ("與均值差", f"{(cur_evs/ind_avg-1)*100:+.1f}%", "white"),
+            ("目標倍數", f"{fn(ind_avg)}x", "orange"),
+        ]):
+            ix = M + i*(iw+GAP)
+            _card(c, ix, interp_y - 20*mm, iw, 20*mm, fill="card")
+            _txt(c, ititle, ix+iw/2, interp_y-5*mm,  size=8, col="gray",  align="c")
+            _txt(c, itext,  ix+iw/2, interp_y-14*mm, size=13, col=icol,   align="c")
 
     _ftr(c)
 
@@ -1199,13 +1265,13 @@ def p09(c, sd, sotp_rows, sotp_ps):
     fv_y = th_y - (len(sotp_rows)+2)*row_h - 8*mm
     _txt(c, "SOTP vs 現價", M, fv_y, size=10, col="orange")
     fv_y -= 10*mm
-    cw3s = (CW - 8*mm) / 3
+    cw3s = (CW - GAP*2) / 3
     for i, (lb, val, col) in enumerate([
         ("SOTP Fair Value", sotp_ps, "white"),
         ("現價", price, "orange"),
         ("折/溢價", None, "green" if (sotp_ps and price and sotp_ps > price) else "red"),
     ]):
-        sx = M + i * (cw3s + 4*mm)
+        sx = M + i * (cw3s + GAP)
         _card(c, sx, fv_y-22*mm, cw3s, 22*mm, fill="card")
         _txt(c, lb, sx+cw3s/2, fv_y-4*mm, size=8, col="gray", align="c")
         if i < 2:
