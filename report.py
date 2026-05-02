@@ -35,15 +35,17 @@ HEX = dict(
 C = {k: colors.HexColor(v) for k, v in HEX.items()}
 
 PW, PH = A4
-M   = 14 * mm
-HDR = 13 * mm
-FTR =  8 * mm
+M   = 9 * mm       # 25 pt margins (was 14 mm / ~40 pt)
+HDR = 11 * mm
+FTR =  6 * mm
 CW  = PW - 2 * M
 CT  = PH - M - HDR
 CB  = M  + FTR
 CH  = CT - CB
 TODAY = datetime.today().strftime("%Y-%m-%d")
-TOTAL_PAGES = 18
+TOTAL_PAGES = 20
+FS  = 0.85          # global font scale — 15% smaller
+GAP = 2 * mm        # halved inter-card column gap
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FONT  (Windows msjh.ttc first, then Linux / macOS fallbacks)
@@ -397,59 +399,106 @@ def make_radar(scores):
     fig.tight_layout()
     return fig
 
-def _make_price_chart_internal(df, lookback, ma_short, ma_long, ma_extra, sup, res, title):
+def _candlestick_chart(df, lookback, ma_short, ma_long, ma_extra, sup, res, title):
+    """K-line (candlestick) chart with MA, S/R dashes and auto trend lines."""
     sub = df.tail(lookback).copy()
     if len(sub) < 5: return None
     plt.rcParams.update(_MRC)
-    fig = plt.figure(figsize=(10, 5.5), facecolor=HEX["bg"])
-    gs2 = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[3, 1], hspace=0.06)
+    fig = plt.figure(figsize=(8, 10), facecolor=HEX["bg"])
+    gs2 = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[3, 1], hspace=0.05)
     ax1 = fig.add_subplot(gs2[0])
     ax2 = fig.add_subplot(gs2[1], sharex=ax1)
     ax1.set_facecolor(HEX["card"]); ax2.set_facecolor(HEX["card"])
-    n   = len(sub); dates = list(range(n))
-    close = sub["Close"].values
-    ax1.plot(dates, close, color=HEX["white"], lw=1.2, label="收盤價")
+    n = len(sub)
+    opens  = sub["Open"].values
+    highs  = sub["High"].values
+    lows   = sub["Low"].values
+    closes = sub["Close"].values
+
+    # ── Candlestick bodies + wicks ──────────────────────────────────────
+    for i in range(n):
+        up = closes[i] >= opens[i]
+        col = HEX["green"] if up else HEX["red"]
+        ax1.plot([i, i], [lows[i], highs[i]], color=col, lw=0.7, zorder=2)
+        body_lo = min(opens[i], closes[i])
+        body_hi = max(opens[i], closes[i])
+        ax1.bar(i, max(body_hi - body_lo, highs[i]*0.001),
+                bottom=body_lo, color=col, width=0.65, alpha=0.92, zorder=3)
+
+    # ── MA lines ────────────────────────────────────────────────────────
     if n >= ma_short:
         ms = sub["Close"].rolling(ma_short).mean().values
-        ax1.plot(dates, ms, color=HEX["orange"], lw=1.1, label=f"MA{ma_short}")
+        ax1.plot(range(n), ms, color=HEX["orange"], lw=1.1, label=f"MA{ma_short}", zorder=4)
     if n >= ma_long:
         ml = sub["Close"].rolling(ma_long).mean().values
-        ax1.plot(dates, ml, color=HEX["white"], lw=0.9, ls="--", alpha=0.7, label=f"MA{ma_long}")
+        ax1.plot(range(n), ml, color=HEX["white"], lw=0.85, ls="--",
+                 alpha=0.7, label=f"MA{ma_long}", zorder=4)
     if ma_extra and n >= ma_extra:
         me = sub["Close"].rolling(ma_extra).mean().values
-        ax1.plot(dates, me, color=HEX["yellow"], lw=1, alpha=0.85, label=f"MA{ma_extra}")
+        ax1.plot(range(n), me, color=HEX["yellow"], lw=0.95,
+                 alpha=0.85, label=f"MA{ma_extra}", zorder=4)
+
+    # ── S/R horizontal dashes ────────────────────────────────────────────
     for r in (res or [])[-2:]:
-        ax1.axhline(r, color=HEX["red"], ls="--", lw=0.8, alpha=0.75)
-        ax1.text(n-1, r, f" {r:.2f}", color=HEX["red"], fontsize=6.5, va="bottom")
+        ax1.axhline(r, color=HEX["red"], ls="--", lw=0.75, alpha=0.75)
+        ax1.text(n - 0.5, r, f" {r:.2f}", color=HEX["red"], fontsize=6, va="bottom")
     for s in (sup or [])[-2:]:
-        ax1.axhline(s, color=HEX["green"], ls="--", lw=0.8, alpha=0.75)
-        ax1.text(n-1, s, f" {s:.2f}", color=HEX["green"], fontsize=6.5, va="top")
-    ax1.legend(fontsize=7, loc="upper left",
+        ax1.axhline(s, color=HEX["green"], ls="--", lw=0.75, alpha=0.75)
+        ax1.text(n - 0.5, s, f" {s:.2f}", color=HEX["green"], fontsize=6, va="top")
+
+    # ── Auto trend lines ────────────────────────────────────────────────
+    pn = max(3, n // 10)
+    # Uptrend: connect pivot lows; only draw when slope is positive (↗)
+    lo_idx = [i for i in range(pn, n - pn)
+              if all(lows[i] <= lows[i-pn:i]) and all(lows[i] <= lows[i+1:i+pn+1])]
+    if len(lo_idx) >= 2:
+        xp = np.array(lo_idx[-5:], dtype=float)
+        yp = lows[lo_idx[-5:]]
+        cf = np.polyfit(xp, yp, 1)
+        if cf[0] > 0:  # positive slope → left-bottom to right-top
+            x0, x1 = xp[0], float(n - 1)
+            ax1.plot([x0, x1], [np.polyval(cf, x0), np.polyval(cf, x1)],
+                     color=HEX["green"], lw=1.3, ls="-", alpha=0.85, zorder=5, label="上升趨勢")
+    # Downtrend: connect pivot highs; only draw when slope is negative (↘)
+    hi_idx = [i for i in range(pn, n - pn)
+              if all(highs[i] >= highs[i-pn:i]) and all(highs[i] >= highs[i+1:i+pn+1])]
+    if len(hi_idx) >= 2:
+        xp = np.array(hi_idx[-5:], dtype=float)
+        yp = highs[hi_idx[-5:]]
+        cf = np.polyfit(xp, yp, 1)
+        if cf[0] < 0:  # negative slope → left-top to right-bottom
+            x0, x1 = xp[0], float(n - 1)
+            ax1.plot([x0, x1], [np.polyval(cf, x0), np.polyval(cf, x1)],
+                     color=HEX["red"], lw=1.3, ls="-", alpha=0.85, zorder=5, label="下降趨勢")
+
+    ax1.legend(fontsize=6.5, loc="upper left",
                facecolor=HEX["card2"], labelcolor=HEX["white"], framealpha=0.8)
-    ax1.set_ylabel("價格", fontsize=8, color=HEX["gray"]); ax1.grid(True, alpha=0.3)
-    if title: ax1.set_title(title, color=HEX["white"], fontsize=9, pad=4)
-    vol = sub["Volume"].values
-    vc  = [HEX["green"] if sub["Close"].values[i] >= sub["Open"].values[i]
-           else HEX["red"] for i in range(n)]
-    ax2.bar(dates, vol, color=vc, alpha=0.7)
+    ax1.set_ylabel("價格", fontsize=7, color=HEX["gray"]); ax1.grid(True, alpha=0.25)
+    if title: ax1.set_title(title, color=HEX["white"], fontsize=9, pad=3)
+
+    # ── Volume bars ──────────────────────────────────────────────────────
+    vc = [HEX["green"] if closes[i] >= opens[i] else HEX["red"] for i in range(n)]
+    ax2.bar(range(n), sub["Volume"].values, color=vc, alpha=0.7)
     ax2.set_ylabel("成交量", fontsize=7, color=HEX["gray"]); ax2.grid(True, alpha=0.2)
-    step = max(1, n // 6)
+    step  = max(1, n // 6)
     ticks = list(range(0, n, step))
     tlbls = [sub.index[i].strftime("%m/%d") if hasattr(sub.index[i], "strftime")
              else "" for i in ticks]
     ax2.set_xticks(ticks); ax2.set_xticklabels(tlbls, fontsize=7)
     plt.setp(ax1.get_xticklabels(), visible=False)
-    fig.patch.set_facecolor(HEX["bg"]); fig.tight_layout()
+    fig.patch.set_facecolor(HEX["bg"])
+    fig.tight_layout()
+    fig.subplots_adjust(left=0.07, right=0.98, top=0.97, bottom=0.05)
     return fig
 
 def make_daily_chart(df, sup, res):
-    return _make_price_chart_internal(df, 63, 20, 50, None, sup, res, "日線圖（近3個月）")
+    return _candlestick_chart(df, 63, 20, 50, None, sup, res, "日線圖（近3個月）K線")
 
 def make_weekly_chart(df, sup, res):
-    return _make_price_chart_internal(df, 52, 20, 50, 200, sup, res, "週線圖（近1年）")
+    return _candlestick_chart(df, 52, 20, 50, 200, sup, res, "週線圖（近1年）K線")
 
 def make_monthly_chart(df, sup, res):
-    return _make_price_chart_internal(df, 36, 12, 24, None, sup, res, "月線圖（近3年）")
+    return _candlestick_chart(df, 36, 12, 24, None, sup, res, "月線圖（近3年）K線")
 
 def make_obv_chart(df, lookback=63):
     sub = df.tail(lookback).copy()
@@ -558,12 +607,12 @@ def _card(c, x, y, w, h, fill="card", r=5):
     c.setFillColor(C[fill]); c.roundRect(x, y, w, h, r, stroke=0, fill=1)
 
 def _txt(c, s, x, y, size=9, col="white", align="l"):
-    c.setFont(RL_FONT, size); c.setFillColor(C[col]); s = str(s)
+    c.setFont(RL_FONT, max(6, round(size * FS))); c.setFillColor(C[col]); s = str(s)
     {"c": c.drawCentredString, "r": c.drawRightString}.get(align, c.drawString)(x, y, s)
 
 def _section(c, title, y):
-    c.setFillColor(C["orange"]); c.roundRect(M, y, 3, 13, 1, stroke=0, fill=1)
-    _txt(c, title, M+7, y+1, size=11, col="white")
+    c.setFillColor(C["orange"]); c.roundRect(M, y, 3, 11, 1, stroke=0, fill=1)
+    _txt(c, title, M+6, y+1, size=10, col="white")
 
 def _scorebar(c, x, y, w, score, h=5, col=None):
     if col is None:
@@ -705,8 +754,8 @@ def p03(c, sd, ov, rec, rc, dcf_fair, pe_base, evs_base):
     _section(c, "投資論點摘要  Investment Thesis", CT - 8*mm)
 
     # ── Three horizontal cards ───────────────────────────────────────────
-    cw3 = (CW - 8*mm) / 3; ch = 58*mm
-    cy  = CT - 8*mm - 16*mm - ch
+    cw3 = (CW - GAP*2) / 3; ch = 60*mm
+    cy  = CT - 6*mm - 14*mm - ch
 
     price = sd.price or 0
     cands = [v for v in [dcf_fair, pe_base, evs_base] if v]
@@ -734,12 +783,12 @@ def p03(c, sd, ov, rec, rc, dcf_fair, pe_base, evs_base):
         ]),
     ]
     for i, (title, col, items) in enumerate(cards3):
-        cx = M + i * (cw3 + 4*mm)
+        cx = M + i * (cw3 + GAP)
         _card(c, cx, cy, cw3, ch, fill="card")
         c.setFillColor(C[col]); c.roundRect(cx, cy+ch-10*mm, cw3, 10*mm, 5, stroke=0, fill=1)
         _txt(c, title, cx+cw3/2, cy+ch-6.5*mm, size=9, col="white", align="c")
         for j, item in enumerate(items):
-            _txt(c, item, cx+3*mm, cy+ch-15*mm - j*7.5*mm, size=7.5, col="white")
+            _txt(c, item, cx+3*mm, cy+ch-15*mm - j*8*mm, size=7.5, col="white")
 
     # ── Valuation Range Bar ──────────────────────────────────────────────
     vy = cy - 22*mm
@@ -835,12 +884,12 @@ def p04(c, sd, rsi_val, perf52):
     ]
 
     # Three columns
-    cw3 = (CW - 8*mm) / 3; ch = 65*mm
-    col_y = CT - 8*mm - 16*mm - ch
+    cw3 = (CW - GAP*2) / 3; ch = 68*mm
+    col_y = CT - 6*mm - 14*mm - ch
     cols = [("Bull Thesis","green",bull_pts), ("Bear Thesis","red",bear_pts),
             ("Key Confirmations","blue",conf_pts)]
     for i, (title, col, pts) in enumerate(cols):
-        cx = M + i * (cw3 + 4*mm)
+        cx = M + i * (cw3 + GAP)
         _card(c, cx, col_y, cw3, ch, fill="card")
         c.setFillColor(C[col]); c.roundRect(cx, col_y+ch-10*mm, cw3, 10*mm, 5, stroke=0, fill=1)
         _txt(c, title, cx+cw3/2, col_y+ch-6.5*mm, size=9, col="white", align="c")
@@ -985,11 +1034,11 @@ def _val_page_header(c, sd, pg, main_title, subtitle):
 def _scenario_cards(c, sd, bear, base, bull, y):
     """Bear / Base / Bull scenario cards row."""
     price = sd.price or 0
-    sw = (CW - 8*mm) / 3
+    sw = (CW - GAP*2) / 3
     for i, (label, val, col) in enumerate([("Bear 悲觀", bear, "red"),
                                             ("Base 基本", base, "white"),
                                             ("Bull 樂觀", bull, "green")]):
-        sx = M + i * (sw + 4*mm)
+        sx = M + i * (sw + GAP)
         _card(c, sx, y, sw, 28*mm, fill="card")
         c.setFillColor(C[col]); c.roundRect(sx, y+18*mm, sw, 10*mm, 4, stroke=0, fill=1)
         _txt(c, label, sx+sw/2, y+23*mm, size=8.5, col="white", align="c")
@@ -1053,9 +1102,9 @@ def p06(c, sd, dcf_fair, wacc, tgr):
     # Scenario analysis
     _txt(c, "情境分析（調整FCF成長假設）", rx, ry, size=9, col="orange")
     ry -= 10*mm
-    sw = (rw - 8*mm) / 3
+    sw = (rw - GAP*2) / 3
     for i, (scen, mult) in enumerate([("Bear -30%", 0.70), ("Base", 1.00), ("Bull +30%", 1.30)]):
-        sx = rx + i*(sw+4*mm)
+        sx = rx + i*(sw+GAP)
         fv = (dcf_fair * mult) if dcf_fair else None
         col = "red" if i==0 else "white" if i==1 else "green"
         _card(c, sx, ry-22*mm, sw, 22*mm, fill="card")
@@ -1073,34 +1122,39 @@ def p07(c, sd, tpe, pe_bear, pe_base, pe_bull):
                      "以預期每股盈利（EPS）與目標市盈率計算目標股價")
 
     price = sd.price
+    aw = CW * 0.44; ay_top = CT - 20*mm
+    assump_h = 55*mm
+    assump_y = ay_top - 8*mm - assump_h   # bottom of assump card
 
-    aw = CW * 0.44; ay_top = CT - 22*mm
+    # LEFT: data card
     _txt(c, "PE 數據概覽", M, ay_top, size=10, col="orange")
-    _assump_card(c, M, ay_top - 10*mm - 55*mm, aw, 55*mm, [
-        ("Trailing EPS",   fn(sd.eps_trail)),
-        ("Forward EPS",    fn(sd.eps_fwd)),
-        ("Trailing PE",    fn(sd.pe_trail)),
-        ("Forward PE",     fn(sd.pe_fwd)),
+    _assump_card(c, M, assump_y, aw, assump_h, [
+        ("Trailing EPS",         fn(sd.eps_trail)),
+        ("Forward EPS",          fn(sd.eps_fwd)),
+        ("Trailing PE",          fn(sd.pe_trail)),
+        ("Forward PE",           fn(sd.pe_fwd)),
         ("Target PE（用於估值）", fn(tpe)),
-        ("PEG Ratio",      fn(sd.peg)),
+        ("PEG Ratio",            fn(sd.peg)),
     ])
 
-    # Scenario cards
-    rw = CW * 0.50; rx = M + aw + 6*mm
+    # RIGHT: scenario cards (same top, shorter — fits above assump card bottom)
+    rw = CW * 0.50; rx = M + aw + GAP * 3
     _txt(c, "目標股價（情境）", rx, ay_top, size=10, col="orange")
-    _scenario_cards(c, sd, pe_bear, pe_base, pe_bull, ay_top - 10*mm - 28*mm)
+    _scenario_cards(c, sd, pe_bear, pe_base, pe_bull, ay_top - 8*mm - 28*mm)
 
-    # PE vs current comparison
-    comp_y = ay_top - 10*mm - 28*mm - 15*mm
-    _txt(c, "PE 比較分析", M, comp_y, size=10, col="orange")
-    comp_y -= 10*mm
-    cw2 = (CW - 4*mm) / 2
-    for cx, (title, val, note) in [(M, ("Trailing PE", fn(sd.pe_trail), "過去12月盈利")),
-                                    (M+cw2+4*mm, ("Forward PE", fn(sd.pe_fwd), "未來12月預估"))]:
-        _card(c, cx, comp_y-22*mm, cw2, 22*mm, fill="card")
-        _txt(c, title, cx+cw2/2, comp_y-4*mm,  size=8.5, col="gray",  align="c")
-        _txt(c, val,   cx+cw2/2, comp_y-14*mm, size=16,  col="white", align="c")
-        _txt(c, note,  cx+cw2/2, comp_y-20*mm, size=7,   col="gray",  align="c")
+    # BELOW BOTH: PE comparison cards anchored below the taller assump card
+    comp_y = assump_y - 8*mm
+    _txt(c, "PE 比較分析（Trailing vs Forward）", M, comp_y, size=10, col="orange")
+    comp_y -= 8*mm
+    cw2 = (CW - GAP) / 2
+    for i, (cx, title, val, note) in enumerate([
+        (M,          "Trailing PE", fn(sd.pe_trail), "過去12月實際盈利"),
+        (M+cw2+GAP,  "Forward PE",  fn(sd.pe_fwd),  "未來12月預估盈利"),
+    ]):
+        _card(c, cx, comp_y - 24*mm, cw2, 24*mm, fill="card")
+        _txt(c, title, cx+cw2/2, comp_y-4.5*mm, size=8.5, col="gray",  align="c")
+        _txt(c, val,   cx+cw2/2, comp_y-15*mm,  size=18,  col="white", align="c")
+        _txt(c, note,  cx+cw2/2, comp_y-22*mm,  size=7,   col="gray",  align="c")
 
     _ftr(c)
 
@@ -1113,39 +1167,55 @@ def p08(c, sd, ind_avg, evs_bear, evs_base, evs_bull):
 
     price   = sd.price
     cur_evs = sd.ev_sales
+    aw = CW * 0.44; ay_top = CT - 20*mm
+    assump_h = 50*mm
+    assump_y = ay_top - 8*mm - assump_h   # bottom of assump card
 
-    aw = CW * 0.44; ay_top = CT - 22*mm
+    # LEFT: data card
     _txt(c, "EV/Sales 數據", M, ay_top, size=10, col="orange")
-    _assump_card(c, M, ay_top - 10*mm - 50*mm, aw, 50*mm, [
-        ("企業價值（EV）",        fc(sd.ev)),
-        ("總收入（Revenue）",     fc(sd.revenue)),
-        ("EV/Sales（現值）",      fn(cur_evs)),
-        ("EV/Sales（行業估算）",  fn(ind_avg)),
-        ("收入年增率",            fp(sd.rev_gr)),
-        ("流通股數",              fc(sd.shares)),
+    _assump_card(c, M, assump_y, aw, assump_h, [
+        ("企業價值（EV）",       fc(sd.ev)),
+        ("總收入（Revenue）",    fc(sd.revenue)),
+        ("EV/Sales（現值）",     fn(cur_evs)),
+        ("EV/Sales（行業估算）", fn(ind_avg)),
+        ("收入年增率",           fp(sd.rev_gr)),
+        ("流通股數",             fc(sd.shares)),
     ])
 
-    rw = CW * 0.50; rx = M + aw + 6*mm
+    # RIGHT: scenario cards
+    rw = CW * 0.50; rx = M + aw + GAP * 3
     _txt(c, "目標股價（情境）", rx, ay_top, size=10, col="orange")
-    _scenario_cards(c, sd, evs_bear, evs_base, evs_bull, ay_top - 10*mm - 28*mm)
+    _scenario_cards(c, sd, evs_bear, evs_base, evs_bull, ay_top - 8*mm - 28*mm)
 
-    # EV/Sales gauge
-    gauge_y = ay_top - 10*mm - 28*mm - 15*mm
-    _txt(c, "EV/Sales 相對估值", M, gauge_y, size=10, col="orange")
-    gauge_y -= 10*mm
+    # BELOW BOTH: gauge anchored below the taller assump card
+    gauge_y = assump_y - 8*mm
+    _txt(c, "EV/Sales 相對估值（當前 vs 行業均值）", M, gauge_y, size=10, col="orange")
+    gauge_y -= 8*mm
     if cur_evs is not None and ind_avg is not None:
-        bar_w = CW; lo = 0; hi = max(cur_evs, ind_avg) * 1.5 or 10
-        brange = hi - lo or 1
+        bar_w = CW; hi = max(cur_evs, ind_avg) * 1.6 or 10
+        brange = hi or 1
         c.setFillColor(C["card"]); c.roundRect(M, gauge_y-5*mm, bar_w, 8*mm, 4, stroke=0, fill=1)
-        # current
-        fw = bar_w * cur_evs / brange
+        fw = min(bar_w, bar_w * cur_evs / brange)
         c.setFillColor(C["orange"]); c.roundRect(M, gauge_y-5*mm, fw, 8*mm, 4, stroke=0, fill=1)
-        # industry line
         lx = M + bar_w * ind_avg / brange
         c.setStrokeColor(C["white"]); c.setLineWidth(1.5)
-        c.line(lx, gauge_y-7*mm, lx, gauge_y+5*mm)
-        _txt(c, f"現值 {fn(cur_evs)}x", M+fw/2, gauge_y-12*mm, size=7.5, col="orange", align="c")
-        _txt(c, f"行業均值 {fn(ind_avg)}x", lx, gauge_y+7*mm, size=7.5, col="white", align="c")
+        c.line(lx, gauge_y-7*mm, lx, gauge_y+6*mm)
+        _txt(c, f"現值 {fn(cur_evs)}x", M + fw/2, gauge_y - 13*mm, size=7.5, col="orange", align="c")
+        _txt(c, f"行業均值 {fn(ind_avg)}x", lx, gauge_y + 8*mm, size=7.5, col="white", align="c")
+
+        # Three interpretation cards below gauge
+        interp_y = gauge_y - 20*mm
+        iw = (CW - GAP*2) / 3
+        under = cur_evs < ind_avg
+        for i, (ititle, itext, icol) in enumerate([
+            ("相對估值", "低估" if under else "高估", "green" if under else "red"),
+            ("與均值差", f"{(cur_evs/ind_avg-1)*100:+.1f}%", "white"),
+            ("目標倍數", f"{fn(ind_avg)}x", "orange"),
+        ]):
+            ix = M + i*(iw+GAP)
+            _card(c, ix, interp_y - 20*mm, iw, 20*mm, fill="card")
+            _txt(c, ititle, ix+iw/2, interp_y-5*mm,  size=8, col="gray",  align="c")
+            _txt(c, itext,  ix+iw/2, interp_y-14*mm, size=13, col=icol,   align="c")
 
     _ftr(c)
 
@@ -1199,13 +1269,13 @@ def p09(c, sd, sotp_rows, sotp_ps):
     fv_y = th_y - (len(sotp_rows)+2)*row_h - 8*mm
     _txt(c, "SOTP vs 現價", M, fv_y, size=10, col="orange")
     fv_y -= 10*mm
-    cw3s = (CW - 8*mm) / 3
+    cw3s = (CW - GAP*2) / 3
     for i, (lb, val, col) in enumerate([
         ("SOTP Fair Value", sotp_ps, "white"),
         ("現價", price, "orange"),
         ("折/溢價", None, "green" if (sotp_ps and price and sotp_ps > price) else "red"),
     ]):
-        sx = M + i * (cw3s + 4*mm)
+        sx = M + i * (cw3s + GAP)
         _card(c, sx, fv_y-22*mm, cw3s, 22*mm, fill="card")
         _txt(c, lb, sx+cw3s/2, fv_y-4*mm, size=8, col="gray", align="c")
         if i < 2:
@@ -1386,10 +1456,235 @@ def p11(c, sd, stage, ma200_val, stage_slope):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P12 — OBV CHART
+# SETUP DETECTION HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
-def p12(c, sd):
+def detect_setups(df):
+    """Detect 7 entry setup patterns. Returns dict: English name -> bool."""
+    names = ["Cup & Handle", "VCP", "Flat Base", "Double Bottom",
+             "Bull Flag", "Pocket Pivot", "Stage 2 Breakout"]
+    if df is None or len(df) < 60:
+        return {k: False for k in names}
+
+    closes = df["Close"].values
+    highs  = df["High"].values
+    lows   = df["Low"].values
+    vols   = df["Volume"].values
+    opens  = df["Open"].values
+    n      = len(closes)
+    res    = {}
+
+    # 1. Cup & Handle — U-shape in last 80 bars + tight handle in last 15
+    cup_n = min(80, n); q = max(1, cup_n // 4)
+    cup   = closes[-cup_n:]
+    lp    = np.max(cup[:q]); bot = np.min(cup[q:3*q]); rp = np.max(cup[3*q:])
+    depth = (lp - bot) / lp if lp > 0 else 1
+    hdl   = cup[-min(15, q):]
+    hdl_r = (np.max(hdl) - np.min(hdl)) / np.max(hdl) if np.max(hdl) > 0 else 1
+    res["Cup & Handle"] = bool(0.10 <= depth <= 0.50 and rp >= lp * 0.93 and hdl_r <= 0.12)
+
+    # 2. VCP — price range AND volume each contract over 4 consecutive 15-bar windows
+    pranges, pvols = [], []
+    for i in range(4):
+        s, e = n - (i+1)*15, n - i*15
+        if s >= 0:
+            pranges.append(float(np.max(highs[s:e]) - np.min(lows[s:e])))
+            pvols.append(float(np.mean(vols[s:e])))
+    res["VCP"] = bool(len(pranges) >= 3
+                      and all(pranges[j] < pranges[j+1] for j in range(len(pranges)-1))
+                      and pvols[0] < float(np.mean(pvols[1:])))
+
+    # 3. Flat Base — last 25 bars within 15% range
+    fb_n = min(35, n); fb = closes[-fb_n:]
+    fh, fl = float(np.max(fb)), float(np.min(fb))
+    res["Flat Base"] = bool(fb_n >= 15 and fh > 0 and (fh - fl) / fh <= 0.15)
+
+    # 4. Double Bottom — two pivot lows within 5% of each other, W-shape
+    if n >= 40:
+        lb = min(80, n); sl = lows[-lb:]; sh = highs[-lb:]; pn2 = 5
+        lo_pts = [i for i in range(pn2, lb - pn2)
+                  if all(sl[i] <= sl[max(0,i-pn2):i]) and all(sl[i] <= sl[i+1:i+pn2+1])]
+        db = False
+        if len(lo_pts) >= 2:
+            i1, i2 = lo_pts[-2], lo_pts[-1]
+            l1, l2 = sl[i1], sl[i2]
+            if abs(l1 - l2) / max(l1, l2) <= 0.05 and i2 > i1:
+                db = float(np.max(sh[i1:i2+1])) > max(l1, l2) * 1.05
+        res["Double Bottom"] = db
+    else:
+        res["Double Bottom"] = False
+
+    # 5. Bull Flag — strong pole (≥10% gain) + tight flat/down flag (≤8% range)
+    pole_n, flag_n = 15, 10
+    if n >= pole_n + flag_n:
+        pole = closes[-(pole_n+flag_n):-flag_n]; flag = closes[-flag_n:]
+        gain  = (pole[-1] / pole[0] - 1) if pole[0] > 0 else 0
+        fr    = (np.max(flag) - np.min(flag)) / np.max(flag) if np.max(flag) > 0 else 1
+        slope = (flag[-1] - flag[0]) / flag[0] if flag[0] > 0 else 0
+        res["Bull Flag"] = bool(gain >= 0.10 and fr <= 0.08 and -0.08 <= slope <= 0.01)
+    else:
+        res["Bull Flag"] = False
+
+    # 6. Pocket Pivot — today's up-day volume exceeds max down-day volume in prior 10 days
+    if n >= 12:
+        up_today = closes[-1] > opens[-1]
+        if up_today:
+            down_vols = [vols[-(i+2)] for i in range(10) if closes[-(i+2)] < opens[-(i+2)]]
+            res["Pocket Pivot"] = bool(down_vols and vols[-1] > max(down_vols))
+        else:
+            res["Pocket Pivot"] = False
+    else:
+        res["Pocket Pivot"] = False
+
+    # 7. Stage 2 Breakout — price crossed above MA200 within last 25 bars
+    if n >= 210:
+        ma200_s   = df["Close"].rolling(200).mean()
+        ma200_arr = ma200_s.dropna().values
+        cl_arr    = closes[-len(ma200_arr):]
+        s2b = any(cl_arr[-i] > ma200_arr[-i] and cl_arr[-(i+1)] <= ma200_arr[-(i+1)]
+                  for i in range(1, min(25, len(ma200_arr))))
+        res["Stage 2 Breakout"] = s2b
+    else:
+        res["Stage 2 Breakout"] = False
+
+    return res
+
+
+def setup_confirmations(sd, rsi_val):
+    """Returns dict: condition key -> bool."""
+    res = {}
+
+    # MA bullish alignment: MA20 > MA50 > MA200
+    if sd.hist is not None and len(sd.hist) >= 200:
+        m20, m50, m200 = ma(sd.hist, 20), ma(sd.hist, 50), ma(sd.hist, 200)
+        res["ma_bull"] = bool(m20 and m50 and m200 and m20 > m50 > m200)
+    else:
+        res["ma_bull"] = False
+
+    # Breakout volume > 1.5× 20-day average
+    if sd.hist is not None and len(sd.hist) >= 21:
+        v_today = float(sd.hist["Volume"].iloc[-1])
+        v_avg20 = float(sd.hist["Volume"].tail(21).iloc[:-1].mean())
+        res["vol_break"] = v_today > v_avg20 * 1.5
+    else:
+        res["vol_break"] = False
+
+    # OBV trend matches price trend (both up or both down over last 10 bars)
+    if sd.hist is not None and len(sd.hist) >= 20:
+        cl = sd.hist["Close"].values; vl = sd.hist["Volume"].values
+        obv = np.zeros(len(cl))
+        for i in range(1, len(cl)):
+            obv[i] = obv[i-1] + (vl[i] if cl[i] > cl[i-1] else (-vl[i] if cl[i] < cl[i-1] else 0))
+        res["obv_ok"] = bool((obv[-1] > obv[-10]) == (cl[-1] > cl[-10]))
+    else:
+        res["obv_ok"] = False
+
+    # RSI in healthy zone 40–70
+    res["rsi_ok"] = bool(rsi_val is not None and 40 <= rsi_val <= 70)
+
+    return res
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# P12 — SETUP ANALYSIS
+# ══════════════════════════════════════════════════════════════════════════════
+def p12_setup(c, sd, rsi_val):
     _bg(c); _hdr(c, sd.tk, 12)
+    _section(c, "Setup 分析  Entry Setup Analysis", CT - 8*mm)
+
+    setups   = detect_setups(sd.hist)
+    confirms = setup_confirmations(sd, rsi_val)
+
+    setup_items = [
+        ("Cup & Handle",     "杯柄形態"),
+        ("VCP",              "波動收縮 VCP"),
+        ("Flat Base",        "橫盤整理突破"),
+        ("Double Bottom",    "雙底反轉"),
+        ("Bull Flag",        "牛旗 Bull Flag"),
+        ("Pocket Pivot",     "口袋樞紐"),
+        ("Stage 2 Breakout", "Stage 1→2 突破"),
+    ]
+
+    # ── Setup detection grid: row 0 = 4 cards, row 1 = 3 cards (centred) ──
+    top_y  = CT - 22*mm
+    _txt(c, "Setup 形態偵測（7種）", M, top_y, size=10, col="orange")
+    top_y -= 10*mm
+    card_h = 33*mm; gap = 3*mm; ncols = 4
+    cw4    = (CW - (ncols - 1) * gap) / ncols
+
+    for idx, (eng, chi) in enumerate(setup_items):
+        detected = setups.get(eng, False)
+        row = idx // ncols; col = idx % ncols
+        if row == 1:
+            offset = (CW - 3 * (cw4 + gap) + gap) / 2
+            cx = M + offset + col * (cw4 + gap)
+        else:
+            cx = M + col * (cw4 + gap)
+        cy = top_y - row * (card_h + gap) - card_h
+
+        det_col = "green" if detected else "red"
+        _card(c, cx, cy, cw4, card_h, fill="card")
+        c.setFillColor(C[det_col]); c.setFillAlpha(0.15)
+        c.roundRect(cx, cy, cw4, card_h, 5, stroke=0, fill=1); c.setFillAlpha(1)
+        c.setStrokeColor(C[det_col]); c.setLineWidth(0.8)
+        c.roundRect(cx, cy, cw4, card_h, 5, stroke=1, fill=0)
+
+        _txt(c, chi,  cx+cw4/2, cy+card_h-9*mm,  size=8.5, col="white",   align="c")
+        _txt(c, eng,  cx+cw4/2, cy+card_h-16*mm, size=6.5, col="gray",    align="c")
+        mark = "✓  偵測到" if detected else "✗  未偵測"
+        _txt(c, mark, cx+cw4/2, cy+9*mm,          size=9,   col=det_col,   align="c")
+
+    # ── Confirmation conditions ─────────────────────────────────────────────
+    conf_y = top_y - 2 * (card_h + gap) - 10*mm
+    _section(c, "確認條件  Confirmation Checklist", conf_y + 7*mm)
+    conf_y -= 10*mm
+
+    conf_items = [
+        ("ma_bull",   "MA 多頭排列",  "MA20 > MA50 > MA200"),
+        ("vol_break", "突破成交量",   "突破日 > 20日均量 1.5倍"),
+        ("obv_ok",    "OBV 配合",     "OBV趨勢與價格一致"),
+        ("rsi_ok",    "RSI 健康區間", "RSI 介於 40–70"),
+    ]
+    ccw = (CW - 3 * gap) / 4; cch = 24*mm
+    for i, (key, label, desc) in enumerate(conf_items):
+        ok  = confirms.get(key, False)
+        cx  = M + i * (ccw + gap)
+        col = "green" if ok else "red"
+        _card(c, cx, conf_y - cch, ccw, cch, fill="card")
+        _txt(c, "✓" if ok else "✗", cx+ccw/2, conf_y-7*mm,  size=14, col=col,    align="c")
+        _txt(c, label,               cx+ccw/2, conf_y-15*mm, size=8,  col="white", align="c")
+        _txt(c, desc,                cx+ccw/2, conf_y-21*mm, size=6.5,col="gray",  align="c")
+
+    # ── Overall Setup rating ────────────────────────────────────────────────
+    det_count  = sum(1 for v in setups.values()   if v)
+    conf_count = sum(1 for v in confirms.values() if v)
+
+    if   det_count >= 2 and conf_count >= 3:
+        rating, rcol, rdesc = "強力 Setup", "green",  "多項形態確認，入場條件充分，可積極關注"
+    elif det_count >= 1 and conf_count >= 2:
+        rating, rcol, rdesc = "一般 Setup", "orange", "形態偵測到，確認條件尚可，宜審慎入場"
+    elif det_count >= 1 or conf_count >= 1:
+        rating, rcol, rdesc = "等待 Setup", "yellow", "形態或確認條件不足，建議繼續觀察"
+    else:
+        rating, rcol, rdesc = "唔啱入場",   "red",    "未見明確形態及確認條件，暫勿入場"
+
+    rat_y = conf_y - cch - 10*mm
+    _section(c, "整體 Setup 評級  Overall Rating", rat_y + 7*mm)
+    rat_y -= 10*mm
+
+    rw2 = CW * 0.55; rx2 = M + (CW - rw2) / 2; rh2 = 30*mm
+    _card(c, rx2, rat_y - rh2, rw2, rh2, fill=rcol)
+    _txt(c, rating, rx2+rw2/2, rat_y-10*mm, size=20,  col="white", align="c")
+    _txt(c, rdesc,  rx2+rw2/2, rat_y-20*mm, size=7.5, col="white", align="c")
+    _txt(c, f"偵測到 {det_count}/7 種形態  ｜  {conf_count}/4 確認條件達標",
+         rx2+rw2/2, rat_y-rh2+5*mm, size=7, col="white", align="c")
+
+    _ftr(c)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# P13 — OBV CHART
+# ══════════════════════════════════════════════════════════════════════════════
+def p13(c, sd):
+    _bg(c); _hdr(c, sd.tk, 13)
     _section(c, "OBV 資金流向  On-Balance Volume", CT - 8*mm)
     _txt(c, "紅點 = OBV 局部高點（潛在出貨）  綠點 = OBV 局部低點（潛在吸籌）",
          M, CT-20*mm, size=8, col="gray")
@@ -1400,10 +1695,10 @@ def p12(c, sd):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P13 — RSI / MACD
+# P14 — RSI / MACD
 # ══════════════════════════════════════════════════════════════════════════════
-def p13(c, sd, rsi_val):
-    _bg(c); _hdr(c, sd.tk, 13)
+def p14(c, sd, rsi_val):
+    _bg(c); _hdr(c, sd.tk, 14)
     _section(c, "技術指標  RSI / MACD", CT - 8*mm)
 
     # RSI / MACD status cards
@@ -1439,10 +1734,10 @@ def p13(c, sd, rsi_val):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P14 — VOLATILITY
+# P15 — VOLATILITY
 # ══════════════════════════════════════════════════════════════════════════════
-def p14(c, sd):
-    _bg(c); _hdr(c, sd.tk, 14)
+def p15(c, sd):
+    _bg(c); _hdr(c, sd.tk, 15)
     _section(c, "波動率分析  Volatility Analysis", CT - 8*mm)
 
     atr_s  = calc_atr(sd.hist)
@@ -1503,10 +1798,10 @@ def p14(c, sd):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P15 — DAILY CHART
+# P16 — DAILY CHART
 # ══════════════════════════════════════════════════════════════════════════════
-def p15(c, sd, sup_d, res_d):
-    _bg(c); _hdr(c, sd.tk, 15)
+def p16(c, sd, sup_d, res_d):
+    _bg(c); _hdr(c, sd.tk, 16)
     _section(c, "日線圖  Daily Chart（近3個月）", CT - 8*mm)
     _txt(c, "MA20 橙色 ｜ MA50 白色虛線 ｜ 紅色虛線=阻力 ｜ 綠色虛線=支撐",
          M, CT-20*mm, size=8, col="gray")
@@ -1516,10 +1811,10 @@ def p15(c, sd, sup_d, res_d):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P16 — WEEKLY CHART
+# P17 — WEEKLY CHART
 # ══════════════════════════════════════════════════════════════════════════════
-def p16(c, sd, sup_w, res_w):
-    _bg(c); _hdr(c, sd.tk, 16)
+def p17(c, sd, sup_w, res_w):
+    _bg(c); _hdr(c, sd.tk, 17)
     _section(c, "週線圖  Weekly Chart（近1年）", CT - 8*mm)
     _txt(c, "MA20 橙色 ｜ MA50 白色虛線 ｜ MA200 黃色 ｜ 紅色虛線=阻力 ｜ 綠色虛線=支撐",
          M, CT-20*mm, size=8, col="gray")
@@ -1529,10 +1824,10 @@ def p16(c, sd, sup_w, res_w):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P17 — MONTHLY CHART
+# P18 — MONTHLY CHART
 # ══════════════════════════════════════════════════════════════════════════════
-def p17(c, sd, sup_m, res_m):
-    _bg(c); _hdr(c, sd.tk, 17)
+def p18(c, sd, sup_m, res_m):
+    _bg(c); _hdr(c, sd.tk, 18)
     _section(c, "月線圖  Monthly Chart（近3年）", CT - 8*mm)
     _txt(c, "MA12 橙色 ｜ MA24 白色虛線 ｜ 紅色虛線=長期阻力 ｜ 綠色虛線=長期支撐",
          M, CT-20*mm, size=8, col="gray")
@@ -1542,12 +1837,12 @@ def p17(c, sd, sup_m, res_m):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P18 — COMPREHENSIVE CONCLUSION
+# P19 — COMPREHENSIVE CONCLUSION
 # ══════════════════════════════════════════════════════════════════════════════
-def p18(c, sd, scores, ov, rec, rc,
+def p19(c, sd, scores, ov, rec, rc,
         dcf_fair, pe_base, evs_base,
         sup_d, res_d, sup_w, res_w, sup_m, res_m):
-    _bg(c); _hdr(c, sd.tk, 18)
+    _bg(c); _hdr(c, sd.tk, 19)
     _section(c, "綜合結論  Final Conclusion", CT - 8*mm)
 
     price  = sd.price or 0
@@ -1627,6 +1922,96 @@ def p18(c, sd, scores, ov, rec, rc,
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
+# P20 — GLOSSARY
+# ══════════════════════════════════════════════════════════════════════════════
+def p20_glossary(c, sd):
+    _bg(c); _hdr(c, sd.tk, 20)
+    _section(c, "術語解釋  Glossary", CT - 8*mm)
+
+    col_w = (CW - 6*mm) / 2
+    rx    = M + col_w + 6*mm
+    top_y = CT - 22*mm
+
+    # Each column: list of (section_title, [(term, short_desc), ...])
+    left_col = [
+        ("技術指標", [
+            ("RSI",      "相對強弱指數。>70超買，<30超賣，健康區間40-70。"),
+            ("MACD",     "金叉(MACD>Signal)為買入信號，死叉為賣出信號。"),
+            ("OBV",      "能量潮。OBV升配股價升為強勢確認，背離需留意。"),
+            ("ATR",      "平均真實波幅，衡量波動大小，常用作止損距離。"),
+            ("Beta",     ">1波動大於大盤，<1更穩定，<0與大盤負相關。"),
+            ("布林通道", "上軌超買，下軌超賣，通道收縮預示大幅波動。"),
+        ]),
+        ("Stage 1-4 分析", [
+            ("Stage 1", "橫盤整理（Accumulation）：MA200附近蓄勢等待。"),
+            ("Stage 2", "上升趨勢（Uptrend）：站上上升MA200，最佳入場。"),
+            ("Stage 3", "頂部整理（Distribution）：MA200走平，動能減弱。"),
+            ("Stage 4", "下降趨勢（Downtrend）：低於下降MA200，避免持倉。"),
+        ]),
+        ("入場論點", [
+            ("Bull Thesis",  "看多論點，支持股價上升的基本面或技術面理由。"),
+            ("Bear Thesis",  "看空論點，可能導致股價下跌的風險因素。"),
+            ("Catalysts",    "催化劑，近期可觸發股價大幅移動的事件。"),
+            ("Risks",        "風險因素，需要持續監控的潛在負面因素。"),
+        ]),
+    ]
+
+    right_col = [
+        ("估值指標", [
+            ("DCF",      "現金流折現法，用未來FCF折現計算內在價值。"),
+            ("PE",       "市盈率=股價/盈利。Forward PE用預期盈利計算。"),
+            ("EV/Sales", "企業價值/收入，適合高增長或虧損企業估值。"),
+            ("SOTP",     "分部加總估值，各業務線分別估值後加總。"),
+            ("WACC",     "加權平均資本成本，DCF折現率，反映融資成本。"),
+            ("PEG",      "PE/成長率。PEG<1通常視為估值具吸引力。"),
+        ]),
+        ("7種 Setup 形態", [
+            ("Cup & Handle",     "U形整理後小幅回調，突破杯緣為買入信號。"),
+            ("VCP",              "波動幅度遞減整理，代表供應枯竭，等待突破。"),
+            ("Flat Base",        "高位橫盤5-7週（≤15%波幅），突破為買入信號。"),
+            ("Double Bottom",    "W形雙底，兩低點相近，突破頸線為買入信號。"),
+            ("Bull Flag",        "強勢上升後窄幅整理，突破旗頂繼續上攻。"),
+            ("Pocket Pivot",     "上升日量超過過去10日下跌日最大量。"),
+            ("Stage 2 Breakout", "股價從Stage 1突破MA200，進入上升趨勢。"),
+        ]),
+        ("價格水平", [
+            ("MA20/MA50/MA200", "短中長期移動均線。多頭排列=MA20>MA50>MA200。"),
+            ("支持位",          "股價下跌時受到支撐的價格區域，跌破視為弱勢。"),
+            ("阻力位",          "股價上升時遇到拋壓的價格區域，突破視為強勢。"),
+            ("趨勢線",          "上升趨勢連接低點，下降趨勢連接高點。"),
+        ]),
+    ]
+
+    ITEM_H   = 13*mm
+    SEC_H    =  8*mm
+    SEC_GAP  =  3*mm
+
+    for col_i, sections in enumerate([left_col, right_col]):
+        cx    = M if col_i == 0 else rx
+        cur_y = top_y
+
+        for sec_title, items in sections:
+            # Section header bar
+            c.setFillColor(C["orange"])
+            c.roundRect(cx, cur_y - SEC_H, col_w, SEC_H, 4, stroke=0, fill=1)
+            _txt(c, sec_title, cx + col_w/2, cur_y - SEC_H + 2.5*mm, size=8.5,
+                 col="white", align="c")
+            cur_y -= SEC_H
+
+            for term, desc in items:
+                _card(c, cx, cur_y - ITEM_H, col_w, ITEM_H, fill="card")
+                _txt(c, term, cx + 3*mm, cur_y - 4*mm,   size=8,   col="orange")
+                d1 = desc[:38]; d2 = desc[38:]
+                _txt(c, d1,   cx + 3*mm, cur_y - 9*mm,   size=6.5, col="white")
+                if d2:
+                    _txt(c, d2, cx + 3*mm, cur_y - 12.5*mm, size=6.5, col="gray")
+                cur_y -= ITEM_H
+
+            cur_y -= SEC_GAP
+
+    _ftr(c)
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN BUILD FUNCTION
 # ══════════════════════════════════════════════════════════════════════════════
 def build_report(ticker: str, output: str = None):
@@ -1655,29 +2040,31 @@ def build_report(ticker: str, output: str = None):
 
     c = rl_canvas.Canvas(output, pagesize=A4)
 
-    print("繪製 P1  封面…",          flush=True); p01(c, sd, scores, ov, rec, rc);               c.showPage()
-    print("繪製 P2  研究總結…",      flush=True); p02(c, sd, scores, ov, rec, rc);               c.showPage()
-    print("繪製 P3  投資論點…",      flush=True); p03(c, sd, ov, rec, rc, dcf_fair, pe_base, evs_base); c.showPage()
-    print("繪製 P4  多空論點…",      flush=True); p04(c, sd, rsi_val, perf52);                   c.showPage()
-    print("繪製 P5  Decision Map…",  flush=True); p05(c, sd, dcf_fair, pe_base, evs_base);       c.showPage()
-    print("繪製 P6  DCF估值…",       flush=True); p06(c, sd, dcf_fair, wacc, tgr);               c.showPage()
-    print("繪製 P7  PE估值…",        flush=True); p07(c, sd, tpe, pe_bear, pe_base, pe_bull);    c.showPage()
-    print("繪製 P8  EV/Sales…",      flush=True); p08(c, sd, ind_evs, evs_bear, evs_base, evs_bull); c.showPage()
-    print("繪製 P9  SOTP…",          flush=True); p09(c, sd, sotp_rows, sotp_ps);                c.showPage()
-    print("繪製 P10 催化劑與風險…",  flush=True); p10(c, sd);                                    c.showPage()
-    print("繪製 P11 Stage分析…",     flush=True); p11(c, sd, stage, ma200_val, stage_slope);     c.showPage()
-    print("繪製 P12 OBV資金流…",     flush=True); p12(c, sd);                                    c.showPage()
-    print("繪製 P13 RSI/MACD…",      flush=True); p13(c, sd, rsi_val);                           c.showPage()
-    print("繪製 P14 波動率…",        flush=True); p14(c, sd);                                    c.showPage()
-    print("繪製 P15 日線圖…",        flush=True); p15(c, sd, sup_d, res_d);                      c.showPage()
-    print("繪製 P16 週線圖…",        flush=True); p16(c, sd, sup_w, res_w);                      c.showPage()
-    print("繪製 P17 月線圖…",        flush=True); p17(c, sd, sup_m, res_m);                      c.showPage()
-    print("繪製 P18 綜合結論…",      flush=True)
-    p18(c, sd, scores, ov, rec, rc, dcf_fair, pe_base, evs_base,
+    print("繪製 P1  封面…",               flush=True); p01(c, sd, scores, ov, rec, rc);               c.showPage()
+    print("繪製 P2  研究總結…",           flush=True); p02(c, sd, scores, ov, rec, rc);               c.showPage()
+    print("繪製 P3  投資論點…",           flush=True); p03(c, sd, ov, rec, rc, dcf_fair, pe_base, evs_base); c.showPage()
+    print("繪製 P4  多空論點…",           flush=True); p04(c, sd, rsi_val, perf52);                   c.showPage()
+    print("繪製 P5  Decision Map…",       flush=True); p05(c, sd, dcf_fair, pe_base, evs_base);       c.showPage()
+    print("繪製 P6  DCF估值…",            flush=True); p06(c, sd, dcf_fair, wacc, tgr);               c.showPage()
+    print("繪製 P7  PE估值…",             flush=True); p07(c, sd, tpe, pe_bear, pe_base, pe_bull);    c.showPage()
+    print("繪製 P8  EV/Sales…",           flush=True); p08(c, sd, ind_evs, evs_bear, evs_base, evs_bull); c.showPage()
+    print("繪製 P9  SOTP…",               flush=True); p09(c, sd, sotp_rows, sotp_ps);                c.showPage()
+    print("繪製 P10 催化劑與風險…",       flush=True); p10(c, sd);                                    c.showPage()
+    print("繪製 P11 Stage分析…",          flush=True); p11(c, sd, stage, ma200_val, stage_slope);     c.showPage()
+    print("繪製 P12 Setup分析…",          flush=True); p12_setup(c, sd, rsi_val);                     c.showPage()
+    print("繪製 P13 OBV資金流…",          flush=True); p13(c, sd);                                    c.showPage()
+    print("繪製 P14 RSI/MACD…",           flush=True); p14(c, sd, rsi_val);                           c.showPage()
+    print("繪製 P15 波動率…",             flush=True); p15(c, sd);                                    c.showPage()
+    print("繪製 P16 日線圖…",             flush=True); p16(c, sd, sup_d, res_d);                      c.showPage()
+    print("繪製 P17 週線圖…",             flush=True); p17(c, sd, sup_w, res_w);                      c.showPage()
+    print("繪製 P18 月線圖…",             flush=True); p18(c, sd, sup_m, res_m);                      c.showPage()
+    print("繪製 P19 綜合結論…",           flush=True)
+    p19(c, sd, scores, ov, rec, rc, dcf_fair, pe_base, evs_base,
         sup_d, res_d, sup_w, res_w, sup_m, res_m); c.showPage()
+    print("繪製 P20 術語解釋…",           flush=True); p20_glossary(c, sd);                           c.showPage()
 
     c.save()
-    print(f"\n✓ PDF 已生成：{output}  （18頁）")
+    print(f"\n✓ PDF 已生成：{output}  （20頁）")
     return output
 
 # ══════════════════════════════════════════════════════════════════════════════
