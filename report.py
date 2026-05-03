@@ -521,8 +521,8 @@ def make_obv_chart(df, lookback=63):
     lo_pts = [i for i in range(n, len(obv)-n)
               if all(obv[i] <= obv[i-n:i]) and all(obv[i] <= obv[i+1:i+n+1])]
     plt.rcParams.update(_MRC)
-    fig = plt.figure(figsize=(10, 5.5), facecolor=HEX["bg"])
-    gs2 = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[2, 1], hspace=0.08)
+    fig = plt.figure(figsize=(8, 10), facecolor=HEX["bg"])
+    gs2 = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[3, 1], hspace=0.05)
     ax1 = fig.add_subplot(gs2[0]); ax2 = fig.add_subplot(gs2[1], sharex=ax1)
     ax1.set_facecolor(HEX["card"]); ax2.set_facecolor(HEX["card"])
     dates = list(range(len(sub)))
@@ -543,7 +543,9 @@ def make_obv_chart(df, lookback=63):
              else "" for i in ticks]
     ax2.set_xticks(ticks); ax2.set_xticklabels(tlbls, fontsize=7)
     plt.setp(ax1.get_xticklabels(), visible=False)
-    fig.patch.set_facecolor(HEX["bg"]); fig.tight_layout()
+    fig.patch.set_facecolor(HEX["bg"])
+    fig.tight_layout()
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.97, bottom=0.05)
     return fig
 
 def make_rsi_macd_chart(df, lookback=63):
@@ -553,8 +555,8 @@ def make_rsi_macd_chart(df, lookback=63):
     macd   = macd.tail(lookback); signal = signal.tail(lookback); hist = hist.tail(lookback)
     sub    = df.tail(lookback)
     plt.rcParams.update(_MRC)
-    fig = plt.figure(figsize=(10, 5.5), facecolor=HEX["bg"])
-    gs2 = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[1, 1], hspace=0.15)
+    fig = plt.figure(figsize=(8, 10), facecolor=HEX["bg"])
+    gs2 = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[1, 1], hspace=0.12)
     ax1 = fig.add_subplot(gs2[0]); ax2 = fig.add_subplot(gs2[1], sharex=ax1)
     ax1.set_facecolor(HEX["card"]); ax2.set_facecolor(HEX["card"])
     dates = list(range(len(sub)))
@@ -586,7 +588,9 @@ def make_rsi_macd_chart(df, lookback=63):
              else "" for i in ticks]
     ax2.set_xticks(ticks); ax2.set_xticklabels(tlbls, fontsize=7)
     plt.setp(ax1.get_xticklabels(), visible=False)
-    fig.patch.set_facecolor(HEX["bg"]); fig.tight_layout()
+    fig.patch.set_facecolor(HEX["bg"])
+    fig.tight_layout()
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.97, bottom=0.05)
     return fig
 
 # ══════════════════════════════════════════════════════════════════════════════
