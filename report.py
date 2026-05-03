@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""PCircle Research Style — 18-Page Stock Analysis PDF (P1–P18)
+"""PCircle Research Style — 20-Page Stock Analysis PDF (P1–P20)
 Dark #0d0d0d · Orange #f97316 · 繁體中文 · 微軟正黑體 / WQY Zenhei
+P1-9: Fundamentals/Valuation · P10-12: Catalysts/Stage/Setup
+P13-17: Charts (OBV/RSI-MACD/Daily/Weekly/Monthly, 紅升綠跌)
+P18: Conclusion · P19-20: Glossary
 """
 import sys, os, io, math, warnings
 from datetime import datetime
@@ -399,7 +402,7 @@ def make_radar(scores):
     fig.tight_layout()
     return fig
 
-def _candlestick_chart(df, lookback, ma_short, ma_long, ma_extra, sup, res, title):
+def _candlestick_chart(df, lookback, ma_short, ma_long, ma_extra, sup, res, title, chinese_conv=False):
     """K-line (candlestick) chart with MA, S/R dashes and auto trend lines."""
     sub = df.tail(lookback).copy()
     if len(sub) < 5: return None
@@ -418,7 +421,7 @@ def _candlestick_chart(df, lookback, ma_short, ma_long, ma_extra, sup, res, titl
     # ── Candlestick bodies + wicks ──────────────────────────────────────
     for i in range(n):
         up = closes[i] >= opens[i]
-        col = HEX["green"] if up else HEX["red"]
+        col = (HEX["red"] if up else HEX["green"]) if chinese_conv else (HEX["green"] if up else HEX["red"])
         ax1.plot([i, i], [lows[i], highs[i]], color=col, lw=0.7, zorder=2)
         body_lo = min(opens[i], closes[i])
         body_hi = max(opens[i], closes[i])
@@ -477,7 +480,10 @@ def _candlestick_chart(df, lookback, ma_short, ma_long, ma_extra, sup, res, titl
     if title: ax1.set_title(title, color=HEX["white"], fontsize=9, pad=3)
 
     # ── Volume bars ──────────────────────────────────────────────────────
-    vc = [HEX["green"] if closes[i] >= opens[i] else HEX["red"] for i in range(n)]
+    if chinese_conv:
+        vc = [HEX["red"] if closes[i] >= opens[i] else HEX["green"] for i in range(n)]
+    else:
+        vc = [HEX["green"] if closes[i] >= opens[i] else HEX["red"] for i in range(n)]
     ax2.bar(range(n), sub["Volume"].values, color=vc, alpha=0.7)
     ax2.set_ylabel("成交量", fontsize=7, color=HEX["gray"]); ax2.grid(True, alpha=0.2)
     step  = max(1, n // 6)
@@ -492,13 +498,13 @@ def _candlestick_chart(df, lookback, ma_short, ma_long, ma_extra, sup, res, titl
     return fig
 
 def make_daily_chart(df, sup, res):
-    return _candlestick_chart(df, 63, 20, 50, None, sup, res, "日線圖（近3個月）K線")
+    return _candlestick_chart(df, 63, 20, 50, None, sup, res, "日線圖（近3個月）K線", chinese_conv=True)
 
 def make_weekly_chart(df, sup, res):
-    return _candlestick_chart(df, 52, 20, 50, 200, sup, res, "週線圖（近1年）K線")
+    return _candlestick_chart(df, 52, 20, 50, 200, sup, res, "週線圖（近1年）K線", chinese_conv=True)
 
 def make_monthly_chart(df, sup, res):
-    return _candlestick_chart(df, 36, 12, 24, None, sup, res, "月線圖（近3年）K線")
+    return _candlestick_chart(df, 36, 12, 24, None, sup, res, "月線圖（近3年）K線", chinese_conv=True)
 
 def make_obv_chart(df, lookback=63):
     sub = df.tail(lookback).copy()
@@ -1295,52 +1301,54 @@ def p09(c, sd, sotp_rows, sotp_ps):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P10 — CATALYSTS & RISKS
+# P10 — CATALYSTS & RISKS + R:R CARD
 # ══════════════════════════════════════════════════════════════════════════════
-def p10(c, sd):
+def p10(c, sd, dcf_fair, pe_base, evs_base):
     _bg(c); _hdr(c, sd.tk, 10)
     _section(c, "催化劑與風險  Catalysts & Risks", CT - 8*mm)
 
-    half = (CW - 6*mm) / 2
-    rx   = M + half + 6*mm
-    top  = CT - 22*mm
-    col_h = CH - 22*mm
+    half   = (CW - 6*mm) / 2
+    rx     = M + half + 6*mm
+    top    = CT - 22*mm
+    col_h  = 100*mm   # 4 items × 22mm + 10mm header + 2mm pad
 
-    # ── LEFT: Catalysts ──────────────────────────────────────────────────
+    # ── LEFT: Catalysts (4 items) ────────────────────────────────────────
     _card(c, M, top - col_h, half, col_h, fill="card")
     c.setFillColor(C["green"]); c.roundRect(M, top-10*mm, half, 10*mm, 5, stroke=0, fill=1)
     _txt(c, "催化劑  Catalysts", M+half/2, top-6.5*mm, size=9, col="white", align="c")
 
     cats = []
     if sd.rev_gr and sd.rev_gr > 0.10:
-        cats.append(("近期（3-6個月）", f"收入年增 {fp(sd.rev_gr)}，業績超預期機率高"))
+        cats.append(("近期（1-3個月）", f"收入年增 {fp(sd.rev_gr)}，業績超預期機率高"))
     if sd.fcf and sd.fcf > 0:
-        cats.append(("中期（6-12個月）", f"正自由現金流 {fc(sd.fcf)}，回購/股息能力強"))
+        cats.append(("中期（3-6個月）", f"正自由現金流 {fc(sd.fcf)}，回購/股息能力強"))
     if sd.gm and sd.gm > 0.40:
-        cats.append(("長期（1-3年）", f"毛利率 {fp(sd.gm)}，規模效益護城河深厚"))
+        cats.append(("中長期（6-12個月）", f"毛利率 {fp(sd.gm)}，規模效益護城河深厚"))
+    if sd.pe_fwd and sd.pe_fwd and sd.pe_fwd < 20:
+        cats.append(("長期（1-3年）", f"Forward PE {fn(sd.pe_fwd)}x，吸引機構價值資金"))
     defaults_c = [
-        ("近期（3-6個月）", "下季度財報有望超越市場共識預期"),
-        ("中期（6-12個月）", "新產品線擴張帶動市佔率持續提升"),
-        ("長期（1-3年）", "行業長期增長趨勢，龍頭地位穩固"),
+        ("近期（1-3個月）", "下季度財報有望超越市場共識預期"),
+        ("中期（3-6個月）", "新產品線擴張帶動市佔率持續提升"),
+        ("中長期（6-12個月）", "行業長期增長趨勢，龍頭地位穩固"),
+        ("長期（1-3年）", "估值重估空間隨盈利改善逐步打開"),
     ]
     for i, fb in enumerate(defaults_c):
         if len(cats) <= i: cats.append(fb)
-    cats = cats[:3]
+    cats = cats[:4]
 
     cy = top - 18*mm
-    time_cols = ["green", "green", "green"]
     for k, (tag, desc) in enumerate(cats):
-        _card(c, M+3*mm, cy-24*mm, half-6*mm, 24*mm, fill="card2")
-        c.setFillColor(C[time_cols[k]]); c.setFillAlpha(0.85)
-        c.roundRect(M+3*mm, cy-8*mm, half-6*mm, 8*mm, 3, stroke=0, fill=1)
+        _card(c, M+3*mm, cy-20*mm, half-6*mm, 20*mm, fill="card2")
+        c.setFillColor(C["green"]); c.setFillAlpha(0.85)
+        c.roundRect(M+3*mm, cy-7*mm, half-6*mm, 7*mm, 3, stroke=0, fill=1)
         c.setFillAlpha(1)
-        _txt(c, tag, M+5*mm, cy-5*mm, size=7.5, col="white")
-        line1 = desc[:26]; line2 = desc[26:]
-        _txt(c, line1, M+5*mm, cy-14*mm, size=7.5, col="white")
-        if line2: _txt(c, line2, M+5*mm, cy-21*mm, size=7, col="gray")
-        cy -= 29*mm
+        _txt(c, tag, M+5*mm, cy-4.5*mm, size=7, col="white")
+        line1 = desc[:28]; line2 = desc[28:]
+        _txt(c, line1, M+5*mm, cy-11.5*mm, size=7.5, col="white")
+        if line2: _txt(c, line2, M+5*mm, cy-17.5*mm, size=7, col="gray")
+        cy -= 23*mm
 
-    # ── RIGHT: Risks ──────────────────────────────────────────────────────
+    # ── RIGHT: Risks (4 items) ────────────────────────────────────────────
     _card(c, rx, top - col_h, half, col_h, fill="card")
     c.setFillColor(C["red"]); c.roundRect(rx, top-10*mm, half, 10*mm, 5, stroke=0, fill=1)
     _txt(c, "風險因素  Risk Factors", rx+half/2, top-6.5*mm, size=9, col="white", align="c")
@@ -1357,90 +1365,127 @@ def p10(c, sd):
     defaults_r = [
         ("高", "宏觀經濟風險", "利率走高/衰退預期壓制整體估值水平"),
         ("中", "競爭格局惡化", "同業加快擴張，毛利率面臨下行壓力"),
-        ("低", "執行風險", "新業務整合週期長，短期拖累盈利能力"),
+        ("中", "政策監管風險", "行業監管趨嚴，合規成本上升壓力"),
+        ("低", "執行風險", "新業務整合週期長，短期拖累盈利"),
     ]
     for i, fb in enumerate(defaults_r):
         if len(risks) <= i: risks.append(fb)
-    risks = risks[:3]
+    risks = risks[:4]
 
     sev_col = {"高": "red", "中": "yellow", "低": "green"}
     ry2 = top - 18*mm
     for sev, title, desc in risks:
         scol = sev_col.get(sev, "gray")
-        _card(c, rx+3*mm, ry2-24*mm, half-6*mm, 24*mm, fill="card2")
+        _card(c, rx+3*mm, ry2-20*mm, half-6*mm, 20*mm, fill="card2")
         c.setFillColor(C["red"]); c.setFillAlpha(0.7)
-        c.roundRect(rx+3*mm, ry2-8*mm, half-6*mm, 8*mm, 3, stroke=0, fill=1)
+        c.roundRect(rx+3*mm, ry2-7*mm, half-6*mm, 7*mm, 3, stroke=0, fill=1)
         c.setFillAlpha(1)
         bw = 7*mm
         c.setFillColor(C[scol])
-        c.roundRect(rx+half-3*mm-bw, ry2-7*mm, bw, 5.5*mm, 2, stroke=0, fill=1)
-        _txt(c, sev, rx+half-3*mm-bw/2, ry2-5.5*mm, size=7, col="white", align="c")
-        _txt(c, title, rx+5*mm, ry2-5*mm, size=7.5, col="white")
-        line1 = desc[:26]; line2 = desc[26:]
-        _txt(c, line1, rx+5*mm, ry2-14*mm, size=7.5, col="white")
-        if line2: _txt(c, line2, rx+5*mm, ry2-21*mm, size=7, col="gray")
-        ry2 -= 29*mm
+        c.roundRect(rx+half-3*mm-bw, ry2-6.5*mm, bw, 5*mm, 2, stroke=0, fill=1)
+        _txt(c, sev, rx+half-3*mm-bw/2, ry2-5*mm, size=7, col="white", align="c")
+        _txt(c, title, rx+5*mm, ry2-4.5*mm, size=7.5, col="white")
+        line1 = desc[:28]; line2 = desc[28:]
+        _txt(c, line1, rx+5*mm, ry2-11.5*mm, size=7.5, col="white")
+        if line2: _txt(c, line2, rx+5*mm, ry2-17.5*mm, size=7, col="gray")
+        ry2 -= 23*mm
+
+    # ── Risk / Reward Card ────────────────────────────────────────────────
+    price  = sd.price or 0
+    cands  = [v for v in [dcf_fair, pe_base, evs_base] if v]
+    base   = sum(cands)/len(cands) if cands else price
+    entry  = price * 0.98
+    stop   = (sd.w52l or price * 0.85) * 1.01
+    target = base
+    rr_raw = (target - entry) / max(entry - stop, 0.01) if target > entry else 0.0
+    rr_str = f"1 : {rr_raw:.1f}" if target > entry else "N/A"
+    rr_col = "green" if rr_raw >= 2 else "yellow" if rr_raw >= 1 else "red"
+
+    rr_top = top - col_h - 8*mm
+    _section(c, "風報比  Risk / Reward Ratio", rr_top + 7*mm)
+    rr_top -= 8*mm
+    rr_h   = 22*mm
+    rr_cw  = (CW - 3*GAP) / 4
+    for i, (lb, vl, lcol) in enumerate([
+        ("入場參考",   fn(entry),  "white"),
+        ("止損參考",   fn(stop),   "red"),
+        ("目標參考",   fn(target), "green"),
+        ("風報比 R:R", rr_str,     rr_col),
+    ]):
+        rx3 = M + i * (rr_cw + GAP)
+        bg_fill = rr_col if i == 3 else "card"
+        _card(c, rx3, rr_top - rr_h, rr_cw, rr_h, fill=bg_fill)
+        _txt(c, lb,  rx3+rr_cw/2, rr_top-5*mm,  size=7.5, col="gray",  align="c")
+        _txt(c, vl,  rx3+rr_cw/2, rr_top-15*mm, size=10,  col=lcol,    align="c")
 
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P11 — STAN WEINSTEIN STAGE ANALYSIS
+# P11 — STAN WEINSTEIN STAGE ANALYSIS  (horizontal 4-card row)
 # ══════════════════════════════════════════════════════════════════════════════
 def p11(c, sd, stage, ma200_val, stage_slope):
     _bg(c); _hdr(c, sd.tk, 11)
     _section(c, "Stage 分析  Stan Weinstein Stage Analysis", CT - 8*mm)
 
     stage_data = [
-        (1, "第一階段：橫盤整理  Accumulation", "blue",
-         "股價在MA200附近橫向整理，成交量萎縮低迷。",
-         "底部蓄勢，持股者套牢減少，市場積累籌碼。",
-         "等待突破 MA200 確認後才進場", "跌破支撐位立即止損離場"),
-        (2, "第二階段：上升趨勢  Uptrend", "green",
-         "股價站上上升斜率的MA200，成交量溫和放大。",
-         "主力資金積極買入，趨勢明確向上。",
-         "回調至MA50附近可分批加碼", "跌破MA200或成交量異常放大時離場"),
-        (3, "第三階段：頂部整理  Distribution", "yellow",
-         "股價在高位橫向整理，MA200斜率開始走平。",
-         "多空力道相當，上升動能明顯減弱。",
-         "不建議新增倉位，持有觀察", "分批減倉保護利潤，警惕破位信號"),
-        (4, "第四階段：下降趨勢  Downtrend", "red",
-         "股價低於下降斜率的MA200，放量下跌明顯。",
-         "賣方力量主導，趨勢向下確認。",
-         "嚴禁逆勢抄底操作", "立即清倉止損，等待底部確認轉入Stage 1"),
+        (1, "Stage 1", "橫盤整理", "blue",
+         "MA200附近橫向整理，", "成交量萎縮，底部蓄勢。",
+         "突破MA200確認後進場", "跌破支撐位立即止損"),
+        (2, "Stage 2", "上升趨勢", "green",
+         "站上上升斜率MA200，", "成交量溫和放大，趨勢向上。",
+         "回調至MA50可分批加碼", "跌破MA200或異常放量離場"),
+        (3, "Stage 3", "頂部整理", "yellow",
+         "高位橫向整理，MA200", "斜率走平，動能明顯減弱。",
+         "不建議新增倉位，觀察", "分批減倉，警惕破位信號"),
+        (4, "Stage 4", "下降趨勢", "red",
+         "低於下降MA200，", "放量下跌，賣方力量主導。",
+         "嚴禁逆勢抄底操作", "立即清倉，等待底部確認"),
     ]
 
-    sw2 = (CW - 6*mm) / 2; sh = 55*mm
+    gap  = 3*mm
+    sw4  = (CW - 3*gap) / 4
+    sh4  = 80*mm
     sy_top = CT - 22*mm
-    for i, (sn, ttl, scol, d1, d2, en, ex) in enumerate(stage_data):
-        col_i = i % 2; row_i = i // 2
-        sx = M + col_i * (sw2 + 6*mm)
-        sy = sy_top - row_i * (sh + 4*mm) - sh
+
+    for i, (sn, snum, sname, scol, d1a, d1b, en, ex) in enumerate(stage_data):
+        sx = M + i * (sw4 + gap)
+        sy = sy_top - sh4
         is_cur = (stage == sn)
-        _card(c, sx, sy, sw2, sh, fill="card")
+        _card(c, sx, sy, sw4, sh4, fill="card")
         if is_cur:
             c.setFillColor(C[scol]); c.setFillAlpha(0.12)
-            c.roundRect(sx, sy, sw2, sh, 5, stroke=0, fill=1); c.setFillAlpha(1)
+            c.roundRect(sx, sy, sw4, sh4, 5, stroke=0, fill=1); c.setFillAlpha(1)
             c.setStrokeColor(C[scol]); c.setLineWidth(1.5)
-            c.roundRect(sx, sy, sw2, sh, 5, stroke=1, fill=0)
-        c.setFillColor(C[scol]); c.roundRect(sx, sy+sh-10*mm, sw2, 10*mm, 5, stroke=0, fill=1)
-        label = ttl + ("  ◀ 當前" if is_cur else "")
-        _txt(c, label, sx+sw2/2, sy+sh-6.5*mm, size=8.5, col="white", align="c")
-        _txt(c, d1, sx+3*mm, sy+sh-15*mm, size=7.5, col="white")
-        _txt(c, d2, sx+3*mm, sy+sh-22*mm, size=7,   col="gray")
-        _hline(c, sx+3*mm, sy+sh-26*mm, sw2-6*mm)
-        c.setFillColor(C["green"]); c.circle(sx+5*mm, sy+sh-31.5*mm, 2.5, stroke=0, fill=1)
-        _txt(c, en, sx+9*mm, sy+sh-33*mm, size=7.5, col="white")
-        c.setFillColor(C["red"]);   c.circle(sx+5*mm, sy+sh-40.5*mm, 2.5, stroke=0, fill=1)
-        _txt(c, ex, sx+9*mm, sy+sh-42*mm, size=7.5, col="white")
+            c.roundRect(sx, sy, sw4, sh4, 5, stroke=1, fill=0)
+        c.setFillColor(C[scol])
+        c.roundRect(sx, sy+sh4-14*mm, sw4, 14*mm, 5, stroke=0, fill=1)
+        cur_tag = "  ◀" if is_cur else ""
+        _txt(c, snum + cur_tag, sx+sw4/2, sy+sh4-5.5*mm, size=9,   col="white", align="c")
+        _txt(c, sname,          sx+sw4/2, sy+sh4-11*mm,  size=7.5, col="white", align="c")
+
+        _txt(c, d1a, sx+2.5*mm, sy+sh4-19*mm, size=7, col="white")
+        _txt(c, d1b, sx+2.5*mm, sy+sh4-25*mm, size=7, col="gray")
+
+        _hline(c, sx+2.5*mm, sy+sh4-30*mm, sw4-5*mm)
+
+        c.setFillColor(C["green"]); c.circle(sx+4.5*mm, sy+sh4-35.5*mm, 2, stroke=0, fill=1)
+        _txt(c, en[:20], sx+8*mm, sy+sh4-37*mm, size=6.5, col="white")
+        if len(en) > 20:
+            _txt(c, en[20:], sx+8*mm, sy+sh4-43*mm, size=6.5, col="gray")
+
+        c.setFillColor(C["red"]); c.circle(sx+4.5*mm, sy+sh4-50*mm, 2, stroke=0, fill=1)
+        _txt(c, ex[:20], sx+8*mm, sy+sh4-52*mm, size=6.5, col="white")
+        if len(ex) > 20:
+            _txt(c, ex[20:], sx+8*mm, sy+sh4-58*mm, size=6.5, col="gray")
 
     # Summary bar
-    sum_y = sy_top - 2*(sh+4*mm) - 10*mm
+    sum_y = sy_top - sh4 - 10*mm
     _section(c, "當前 Stage 研判", sum_y+7*mm)
     sum_y -= 8*mm
     _card(c, M, sum_y-24*mm, CW, 24*mm, fill="card")
-    stage_lbls = {1:"第一階段 Accumulation",2:"第二階段 Uptrend",
-                  3:"第三階段 Distribution",4:"第四階段 Downtrend"}
-    stage_cols2 = {1:"blue",2:"green",3:"yellow",4:"red"}
+    stage_lbls  = {1:"第一階段 Accumulation", 2:"第二階段 Uptrend",
+                   3:"第三階段 Distribution",  4:"第四階段 Downtrend"}
+    stage_cols2 = {1:"blue", 2:"green", 3:"yellow", 4:"red"}
     if stage:
         scol2 = stage_cols2.get(stage, "gray")
         _txt(c, stage_lbls.get(stage,"N/A"), M+5*mm, sum_y-6.5*mm, size=11, col=scol2)
@@ -1734,76 +1779,12 @@ def p14(c, sd, rsi_val):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P15 — VOLATILITY
+# P15 — DAILY CHART  (紅升綠跌)
 # ══════════════════════════════════════════════════════════════════════════════
-def p15(c, sd):
+def p15(c, sd, sup_d, res_d):
     _bg(c); _hdr(c, sd.tk, 15)
-    _section(c, "波動率分析  Volatility Analysis", CT - 8*mm)
-
-    atr_s  = calc_atr(sd.hist)
-    atr_v  = float(atr_s.dropna().iloc[-1]) if len(atr_s.dropna()) else None
-    _, _, _, bbw_s = calc_bb(sd.hist)
-    bbw_v  = float(bbw_s.dropna().iloc[-1]) if len(bbw_s.dropna()) else None
-    close  = sd.hist["Close"]
-    ann_vol = float(close.pct_change().dropna().std() * math.sqrt(252)) if len(close) > 5 else None
-    beta   = sd.beta or 1.0
-
-    # Metric cards row
-    mets = [
-        ("Beta", fn(beta),           "beta越高波動越大，>1代表放大大盤波動"),
-        ("ATR(14)", fn(atr_v),       f"平均真實波幅，現價的 {fn(atr_v/(sd.price or 1)*100,1)}%"),
-        ("年化波動率", fp(ann_vol),   "過去一年日報酬率標準差 × √252"),
-        ("布林通道寬度", fn(bbw_v,3), "BB寬度 = (上軌-下軌)/中軌，值越大波動越大"),
-    ]
-    cw4m = (CW - 4.5*mm) / 4; mh = 22*mm; my = CT - 22*mm
-    for i, (lb, vl, note) in enumerate(mets):
-        mx = M + i*(cw4m+1.5*mm)
-        col = ("red" if i==0 and beta>1.5
-               else "green" if i==0 and beta<0.8 else "white")
-        _card(c, mx, my-mh, cw4m, mh, fill="card")
-        _txt(c, lb, mx+cw4m/2, my-5*mm,  size=8,   col="gray",  align="c")
-        _txt(c, vl, mx+cw4m/2, my-13*mm, size=12,  col=col,     align="c")
-
-    # Bollinger Band description cards
-    bb_y = my - mh - 10*mm
-    _section(c, "布林通道詮釋  Bollinger Band Interpretation", bb_y+7*mm)
-    bb_y -= 10*mm
-    bb_items = [
-        ("收縮期 Squeeze", "gray",
-         "BB寬度縮小，顯示低波動整理。", "常預示大幅方向性突破即將到來。"),
-        ("上軌突破 Upper Break", "orange",
-         "股價突破上軌，強勢多頭信號。", "可能持續上漲，但注意超買風險。"),
-        ("下軌跌破 Lower Break", "red",
-         "股價跌破下軌，弱勢空頭信號。", "可能持續下跌，關注是否反彈確認。"),
-        ("均值回歸 Mean Revert", "blue",
-         "股價偏離中軌過遠後拉回。", "均值回歸特性，過度偏離有修正壓力。"),
-    ]
-    bw4 = (CW - 4.5*mm) / 4; bh2 = 38*mm
-    for i, (btitle, bcol, bd1, bd2) in enumerate(bb_items):
-        bx = M + i*(bw4+1.5*mm)
-        _card(c, bx, bb_y-bh2, bw4, bh2, fill="card")
-        c.setFillColor(C[bcol if bcol!="gray" else "gray2"])
-        c.roundRect(bx, bb_y-10*mm, bw4, 10*mm, 4, stroke=0, fill=1)
-        _txt(c, btitle, bx+bw4/2, bb_y-6.5*mm, size=8, col="white", align="c")
-        _txt(c, bd1, bx+2*mm, bb_y-16*mm, size=7.5, col="white")
-        _txt(c, bd2, bx+2*mm, bb_y-24*mm, size=7.5, col="gray")
-
-    # Volatility comparison note
-    note_y = bb_y - bh2 - 8*mm
-    _card(c, M, note_y-18*mm, CW, 18*mm, fill="card2")
-    _txt(c, "波動率解讀", M+4*mm, note_y-4*mm, size=8, col="orange")
-    note_str = (f"Beta {fn(beta)} ｜ 年化波動率 {fp(ann_vol)} ｜ ATR {fn(atr_v)} "
-                f"（約現價 {fn(atr_v/(sd.price or 1)*100,1)}%）｜ BB寬度 {fn(bbw_v,3)}")
-    _txt(c, note_str[:80], M+4*mm, note_y-12*mm, size=7.5, col="gray")
-    _ftr(c)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# P16 — DAILY CHART
-# ══════════════════════════════════════════════════════════════════════════════
-def p16(c, sd, sup_d, res_d):
-    _bg(c); _hdr(c, sd.tk, 16)
     _section(c, "日線圖  Daily Chart（近3個月）", CT - 8*mm)
-    _txt(c, "MA20 橙色 ｜ MA50 白色虛線 ｜ 紅色虛線=阻力 ｜ 綠色虛線=支撐",
+    _txt(c, "紅升綠跌  ｜  MA20 橙色 ｜ MA50 白色虛線 ｜ 紅色虛線=阻力 ｜ 綠色虛線=支撐",
          M, CT-20*mm, size=8, col="gray")
     chart_top = CT - 24*mm; chart_bot = CB + 2*mm
     fig = make_daily_chart(sd.hist, sup_d, res_d)
@@ -1811,12 +1792,12 @@ def p16(c, sd, sup_d, res_d):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P17 — WEEKLY CHART
+# P16 — WEEKLY CHART  (紅升綠跌)
 # ══════════════════════════════════════════════════════════════════════════════
-def p17(c, sd, sup_w, res_w):
-    _bg(c); _hdr(c, sd.tk, 17)
+def p16(c, sd, sup_w, res_w):
+    _bg(c); _hdr(c, sd.tk, 16)
     _section(c, "週線圖  Weekly Chart（近1年）", CT - 8*mm)
-    _txt(c, "MA20 橙色 ｜ MA50 白色虛線 ｜ MA200 黃色 ｜ 紅色虛線=阻力 ｜ 綠色虛線=支撐",
+    _txt(c, "紅升綠跌  ｜  MA20 橙色 ｜ MA50 白色虛線 ｜ MA200 黃色 ｜ 紅色虛線=阻力 ｜ 綠色虛線=支撐",
          M, CT-20*mm, size=8, col="gray")
     chart_top = CT - 24*mm; chart_bot = CB + 2*mm
     fig = make_weekly_chart(sd.hist_wk, sup_w, res_w)
@@ -1824,12 +1805,12 @@ def p17(c, sd, sup_w, res_w):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P18 — MONTHLY CHART
+# P17 — MONTHLY CHART  (紅升綠跌)
 # ══════════════════════════════════════════════════════════════════════════════
-def p18(c, sd, sup_m, res_m):
-    _bg(c); _hdr(c, sd.tk, 18)
+def p17(c, sd, sup_m, res_m):
+    _bg(c); _hdr(c, sd.tk, 17)
     _section(c, "月線圖  Monthly Chart（近3年）", CT - 8*mm)
-    _txt(c, "MA12 橙色 ｜ MA24 白色虛線 ｜ 紅色虛線=長期阻力 ｜ 綠色虛線=長期支撐",
+    _txt(c, "紅升綠跌  ｜  MA12 橙色 ｜ MA24 白色虛線 ｜ 紅色虛線=長期阻力 ｜ 綠色虛線=長期支撐",
          M, CT-20*mm, size=8, col="gray")
     chart_top = CT - 24*mm; chart_bot = CB + 2*mm
     fig = make_monthly_chart(sd.hist_mo, sup_m, res_m)
@@ -1837,12 +1818,12 @@ def p18(c, sd, sup_m, res_m):
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P19 — COMPREHENSIVE CONCLUSION
+# P18 — COMPREHENSIVE CONCLUSION
 # ══════════════════════════════════════════════════════════════════════════════
-def p19(c, sd, scores, ov, rec, rc,
+def p18(c, sd, scores, ov, rec, rc,
         dcf_fair, pe_base, evs_base,
         sup_d, res_d, sup_w, res_w, sup_m, res_m):
-    _bg(c); _hdr(c, sd.tk, 19)
+    _bg(c); _hdr(c, sd.tk, 18)
     _section(c, "綜合結論  Final Conclusion", CT - 8*mm)
 
     price  = sd.price or 0
@@ -1922,93 +1903,110 @@ def p19(c, sd, scores, ov, rec, rc,
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# P20 — GLOSSARY
+# GLOSSARY HELPER
 # ══════════════════════════════════════════════════════════════════════════════
-def p20_glossary(c, sd):
-    _bg(c); _hdr(c, sd.tk, 20)
-    _section(c, "術語解釋  Glossary", CT - 8*mm)
+def _gloss_col(c, cx, col_w, top_y, sections, item_h, sec_h=10*mm, sec_gap=3*mm):
+    cur_y = top_y
+    for sec_title, items in sections:
+        c.setFillColor(C["orange"])
+        c.roundRect(cx, cur_y - sec_h, col_w, sec_h, 4, stroke=0, fill=1)
+        _txt(c, sec_title, cx + col_w/2, cur_y - sec_h + 3*mm, size=8.5, col="white", align="c")
+        cur_y -= sec_h
+        for term, d1, d2 in items:
+            _card(c, cx, cur_y - item_h, col_w, item_h, fill="card")
+            _txt(c, term, cx+3*mm, cur_y-4*mm,  size=8,   col="orange")
+            _txt(c, d1,   cx+3*mm, cur_y-9.5*mm, size=7,  col="white")
+            if d2:
+                _txt(c, d2, cx+3*mm, cur_y-15*mm, size=6.5, col="gray")
+            cur_y -= item_h
+        cur_y -= sec_gap
+
+# ══════════════════════════════════════════════════════════════════════════════
+# P19 — GLOSSARY PART 1  術語解釋（上）: Technical + Valuation
+# ══════════════════════════════════════════════════════════════════════════════
+def p19_glossary1(c, sd):
+    _bg(c); _hdr(c, sd.tk, 19)
+    _section(c, "術語解釋（上）  Glossary Part 1", CT - 8*mm)
+    _txt(c, "技術指標 · 估值指標", M, CT-20*mm, size=8, col="gray")
 
     col_w = (CW - 6*mm) / 2
     rx    = M + col_w + 6*mm
-    top_y = CT - 22*mm
+    top_y = CT - 24*mm
+    IH    = 28*mm   # item height — 2 description lines
 
-    # Each column: list of (section_title, [(term, short_desc), ...])
-    left_col = [
-        ("技術指標", [
-            ("RSI",      "相對強弱指數。>70超買，<30超賣，健康區間40-70。"),
-            ("MACD",     "金叉(MACD>Signal)為買入信號，死叉為賣出信號。"),
-            ("OBV",      "能量潮。OBV升配股價升為強勢確認，背離需留意。"),
-            ("ATR",      "平均真實波幅，衡量波動大小，常用作止損距離。"),
-            ("Beta",     ">1波動大於大盤，<1更穩定，<0與大盤負相關。"),
-            ("布林通道", "上軌超買，下軌超賣，通道收縮預示大幅波動。"),
-        ]),
-        ("Stage 1-4 分析", [
-            ("Stage 1", "橫盤整理（Accumulation）：MA200附近蓄勢等待。"),
-            ("Stage 2", "上升趨勢（Uptrend）：站上上升MA200，最佳入場。"),
-            ("Stage 3", "頂部整理（Distribution）：MA200走平，動能減弱。"),
-            ("Stage 4", "下降趨勢（Downtrend）：低於下降MA200，避免持倉。"),
-        ]),
-        ("入場論點", [
-            ("Bull Thesis",  "看多論點，支持股價上升的基本面或技術面理由。"),
-            ("Bear Thesis",  "看空論點，可能導致股價下跌的風險因素。"),
-            ("Catalysts",    "催化劑，近期可觸發股價大幅移動的事件。"),
-            ("Risks",        "風險因素，需要持續監控的潛在負面因素。"),
+    left_items = [
+        ("技術指標  Technical", [
+            ("RSI",      "相對強弱指數（14日）。>70為超買，<30為超賣，",     "健康操作區間建議 40–70，動能強時維持高位。"),
+            ("MACD",     "快線(12EMA)-慢線(26EMA)。MACD>Signal 金叉買入，", "MACD<Signal 死叉賣出，柱狀圖顯示動能強弱。"),
+            ("OBV",      "能量潮：上漲日累加成交量，下跌日扣除。",           "OBV上升配股價上升為強勢確認；背離預示反轉。"),
+            ("ATR",      "平均真實波幅（14日）：衡量市場近期波動大小，",     "常作為止損距離依據，ATR越大風險越高。"),
+            ("Beta",     ">1波動放大大盤，<1更穩定，接近0獨立於大盤，",     "<0與大盤負相關。高Beta股在牛市漲更多。"),
+            ("布林通道", "中軌=MA20，上/下軌=中軌±2倍標準差。",             "股價觸及上軌超買，觸及下軌超賣；通道收縮預示大波動。"),
         ]),
     ]
 
-    right_col = [
-        ("估值指標", [
-            ("DCF",      "現金流折現法，用未來FCF折現計算內在價值。"),
-            ("PE",       "市盈率=股價/盈利。Forward PE用預期盈利計算。"),
-            ("EV/Sales", "企業價值/收入，適合高增長或虧損企業估值。"),
-            ("SOTP",     "分部加總估值，各業務線分別估值後加總。"),
-            ("WACC",     "加權平均資本成本，DCF折現率，反映融資成本。"),
-            ("PEG",      "PE/成長率。PEG<1通常視為估值具吸引力。"),
-        ]),
-        ("7種 Setup 形態", [
-            ("Cup & Handle",     "U形整理後小幅回調，突破杯緣為買入信號。"),
-            ("VCP",              "波動幅度遞減整理，代表供應枯竭，等待突破。"),
-            ("Flat Base",        "高位橫盤5-7週（≤15%波幅），突破為買入信號。"),
-            ("Double Bottom",    "W形雙底，兩低點相近，突破頸線為買入信號。"),
-            ("Bull Flag",        "強勢上升後窄幅整理，突破旗頂繼續上攻。"),
-            ("Pocket Pivot",     "上升日量超過過去10日下跌日最大量。"),
-            ("Stage 2 Breakout", "股價從Stage 1突破MA200，進入上升趨勢。"),
-        ]),
-        ("價格水平", [
-            ("MA20/MA50/MA200", "短中長期移動均線。多頭排列=MA20>MA50>MA200。"),
-            ("支持位",          "股價下跌時受到支撐的價格區域，跌破視為弱勢。"),
-            ("阻力位",          "股價上升時遇到拋壓的價格區域，突破視為強勢。"),
-            ("趨勢線",          "上升趨勢連接低點，下降趨勢連接高點。"),
+    right_items = [
+        ("估值指標  Valuation", [
+            ("DCF",      "現金流折現法：將未來5年FCF加終值折現，",           "以WACC作折現率計算股票內在價值。"),
+            ("PE",       "市盈率=股價/盈利（EPS）。Trailing PE用過去盈利，", "Forward PE用預期盈利，成長股用Forward更準確。"),
+            ("EV/Sales", "企業價值/總收入，適合高成長期或虧損公司，",        "行業間比較估值吸引力，倍數越低越便宜。"),
+            ("SOTP",     "分部加總估值：各業務線分別估值後加總，",           "再扣除淨債務，得出整體Fair Value Per Share。"),
+            ("WACC",     "加權平均資本成本=Rf+Beta×ERP，",                   "DCF折現率，反映公司融資成本，越低估值越高。"),
+            ("PEG",      "PE/盈利成長率。PEG<1通常視為估值具吸引力，",      "PEG=1表示PE與成長率匹配，是合理估值基準。"),
         ]),
     ]
 
-    ITEM_H   = 13*mm
-    SEC_H    =  8*mm
-    SEC_GAP  =  3*mm
+    _gloss_col(c, M,  col_w, top_y, left_items,  IH)
+    _gloss_col(c, rx, col_w, top_y, right_items, IH)
+    _ftr(c)
 
-    for col_i, sections in enumerate([left_col, right_col]):
-        cx    = M if col_i == 0 else rx
-        cur_y = top_y
+# ══════════════════════════════════════════════════════════════════════════════
+# P20 — GLOSSARY PART 2  術語解釋（下）: Stage/Setup/Concepts/Price
+# ══════════════════════════════════════════════════════════════════════════════
+def p20_glossary2(c, sd):
+    _bg(c); _hdr(c, sd.tk, 20)
+    _section(c, "術語解釋（下）  Glossary Part 2", CT - 8*mm)
+    _txt(c, "Stage 分析 · 7種 Setup 形態 · 論點概念 · 價格水平", M, CT-20*mm, size=8, col="gray")
 
-        for sec_title, items in sections:
-            # Section header bar
-            c.setFillColor(C["orange"])
-            c.roundRect(cx, cur_y - SEC_H, col_w, SEC_H, 4, stroke=0, fill=1)
-            _txt(c, sec_title, cx + col_w/2, cur_y - SEC_H + 2.5*mm, size=8.5,
-                 col="white", align="c")
-            cur_y -= SEC_H
+    col_w = (CW - 6*mm) / 2
+    rx    = M + col_w + 6*mm
+    top_y = CT - 24*mm
 
-            for term, desc in items:
-                _card(c, cx, cur_y - ITEM_H, col_w, ITEM_H, fill="card")
-                _txt(c, term, cx + 3*mm, cur_y - 4*mm,   size=8,   col="orange")
-                d1 = desc[:38]; d2 = desc[38:]
-                _txt(c, d1,   cx + 3*mm, cur_y - 9*mm,   size=6.5, col="white")
-                if d2:
-                    _txt(c, d2, cx + 3*mm, cur_y - 12.5*mm, size=6.5, col="gray")
-                cur_y -= ITEM_H
+    left_items = [
+        ("Stage 1-4 分析  Stan Weinstein", [
+            ("Stage 1", "橫盤整理（Accumulation）：", "MA200附近蓄勢，成交量低迷，等待突破確認。"),
+            ("Stage 2", "上升趨勢（Uptrend）：",       "站上上升MA200，最佳入場期，主力積極吸籌。"),
+            ("Stage 3", "頂部整理（Distribution）：",  "MA200走平，多空均衡，動能減弱，建議觀望。"),
+            ("Stage 4", "下降趨勢（Downtrend）：",     "低於下降MA200，賣方主導，避免持倉入場。"),
+        ]),
+        ("論點概念  Thesis Concepts", [
+            ("Bull Thesis",  "看多論點：",   "支持股價上升的基本面/技術面/催化劑理由。"),
+            ("Bear Thesis",  "看空論點：",   "可能導致股價下跌的風險/逆風/估值過高理由。"),
+            ("Catalysts",    "催化劑：",     "近期可能觸發股價大幅移動的正面事件或消息。"),
+            ("Risk Factors", "風險因素：",   "需持續監控的潛在負面因素，高/中/低嚴重程度。"),
+        ]),
+    ]
 
-            cur_y -= SEC_GAP
+    right_items = [
+        ("7種 Setup 進場形態", [
+            ("Cup & Handle",     "杯柄形態：",         "U形整理後小幅回調（柄），突破杯緣為進場信號。"),
+            ("VCP",              "波動收縮形態：",     "價格波動幅度遞減整理，代表供應耗盡，等待突破。"),
+            ("Flat Base",        "橫盤整理突破：",     "高位橫盤5-7週（≤15%波幅），突破整理區上沿進場。"),
+            ("Double Bottom",    "W形雙底反轉：",      "兩低點相近（≤5%差距），突破頸線高點為買入信號。"),
+            ("Bull Flag",        "牛旗形態：",         "強勢上升極（≥10%）後窄幅橫盤，突破旗頂繼續攻。"),
+            ("Pocket Pivot",     "口袋樞紐：",         "今日上升日量超過過去10日所有下跌日最大量。"),
+            ("Stage 2 Breakout", "Stage突破：",        "股價從Stage 1橫盤突破MA200，確認進入Stage 2。"),
+        ]),
+        ("價格水平  Price Levels", [
+            ("MA20/50/200",  "短中長期移動均線：",   "多頭排列=MA20>MA50>MA200，是最強趨勢信號。"),
+            ("支持位",       "Support Level：",       "股價下跌時受到支撐的價格區域，跌破視為弱勢。"),
+            ("阻力位",       "Resistance Level：",    "股價上升時遇到拋壓的價格區域，突破視為強勢。"),
+            ("趨勢線",       "上升/下降趨勢線：",     "上升趨勢連接低點；下降趨勢連接高點，斜率即方向。"),
+        ]),
+    ]
 
+    _gloss_col(c, M,  col_w, top_y, left_items,  20*mm)
+    _gloss_col(c, rx, col_w, top_y, right_items, 16*mm)
     _ftr(c)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2040,28 +2038,28 @@ def build_report(ticker: str, output: str = None):
 
     c = rl_canvas.Canvas(output, pagesize=A4)
 
-    print("繪製 P1  封面…",               flush=True); p01(c, sd, scores, ov, rec, rc);               c.showPage()
-    print("繪製 P2  研究總結…",           flush=True); p02(c, sd, scores, ov, rec, rc);               c.showPage()
-    print("繪製 P3  投資論點…",           flush=True); p03(c, sd, ov, rec, rc, dcf_fair, pe_base, evs_base); c.showPage()
-    print("繪製 P4  多空論點…",           flush=True); p04(c, sd, rsi_val, perf52);                   c.showPage()
-    print("繪製 P5  Decision Map…",       flush=True); p05(c, sd, dcf_fair, pe_base, evs_base);       c.showPage()
-    print("繪製 P6  DCF估值…",            flush=True); p06(c, sd, dcf_fair, wacc, tgr);               c.showPage()
-    print("繪製 P7  PE估值…",             flush=True); p07(c, sd, tpe, pe_bear, pe_base, pe_bull);    c.showPage()
-    print("繪製 P8  EV/Sales…",           flush=True); p08(c, sd, ind_evs, evs_bear, evs_base, evs_bull); c.showPage()
-    print("繪製 P9  SOTP…",               flush=True); p09(c, sd, sotp_rows, sotp_ps);                c.showPage()
-    print("繪製 P10 催化劑與風險…",       flush=True); p10(c, sd);                                    c.showPage()
-    print("繪製 P11 Stage分析…",          flush=True); p11(c, sd, stage, ma200_val, stage_slope);     c.showPage()
-    print("繪製 P12 Setup分析…",          flush=True); p12_setup(c, sd, rsi_val);                     c.showPage()
-    print("繪製 P13 OBV資金流…",          flush=True); p13(c, sd);                                    c.showPage()
-    print("繪製 P14 RSI/MACD…",           flush=True); p14(c, sd, rsi_val);                           c.showPage()
-    print("繪製 P15 波動率…",             flush=True); p15(c, sd);                                    c.showPage()
-    print("繪製 P16 日線圖…",             flush=True); p16(c, sd, sup_d, res_d);                      c.showPage()
-    print("繪製 P17 週線圖…",             flush=True); p17(c, sd, sup_w, res_w);                      c.showPage()
-    print("繪製 P18 月線圖…",             flush=True); p18(c, sd, sup_m, res_m);                      c.showPage()
-    print("繪製 P19 綜合結論…",           flush=True)
-    p19(c, sd, scores, ov, rec, rc, dcf_fair, pe_base, evs_base,
-        sup_d, res_d, sup_w, res_w, sup_m, res_m); c.showPage()
-    print("繪製 P20 術語解釋…",           flush=True); p20_glossary(c, sd);                           c.showPage()
+    print("繪製 P1  封面…",               flush=True); p01(c, sd, scores, ov, rec, rc);                          c.showPage()
+    print("繪製 P2  研究總結…",           flush=True); p02(c, sd, scores, ov, rec, rc);                          c.showPage()
+    print("繪製 P3  投資論點…",           flush=True); p03(c, sd, ov, rec, rc, dcf_fair, pe_base, evs_base);     c.showPage()
+    print("繪製 P4  多空論點…",           flush=True); p04(c, sd, rsi_val, perf52);                              c.showPage()
+    print("繪製 P5  Decision Map…",       flush=True); p05(c, sd, dcf_fair, pe_base, evs_base);                  c.showPage()
+    print("繪製 P6  DCF估值…",            flush=True); p06(c, sd, dcf_fair, wacc, tgr);                          c.showPage()
+    print("繪製 P7  PE估值…",             flush=True); p07(c, sd, tpe, pe_bear, pe_base, pe_bull);               c.showPage()
+    print("繪製 P8  EV/Sales…",           flush=True); p08(c, sd, ind_evs, evs_bear, evs_base, evs_bull);        c.showPage()
+    print("繪製 P9  SOTP…",               flush=True); p09(c, sd, sotp_rows, sotp_ps);                           c.showPage()
+    print("繪製 P10 催化劑與風險…",       flush=True); p10(c, sd, dcf_fair, pe_base, evs_base);                  c.showPage()
+    print("繪製 P11 Stage分析…",          flush=True); p11(c, sd, stage, ma200_val, stage_slope);                c.showPage()
+    print("繪製 P12 Setup分析…",          flush=True); p12_setup(c, sd, rsi_val);                                c.showPage()
+    print("繪製 P13 OBV資金流…",          flush=True); p13(c, sd);                                               c.showPage()
+    print("繪製 P14 RSI/MACD…",           flush=True); p14(c, sd, rsi_val);                                      c.showPage()
+    print("繪製 P15 日線圖…",             flush=True); p15(c, sd, sup_d, res_d);                                 c.showPage()
+    print("繪製 P16 週線圖…",             flush=True); p16(c, sd, sup_w, res_w);                                 c.showPage()
+    print("繪製 P17 月線圖…",             flush=True); p17(c, sd, sup_m, res_m);                                 c.showPage()
+    print("繪製 P18 綜合結論…",           flush=True)
+    p18(c, sd, scores, ov, rec, rc, dcf_fair, pe_base, evs_base,
+        sup_d, res_d, sup_w, res_w, sup_m, res_m);                                                                c.showPage()
+    print("繪製 P19 術語解釋（上）…",     flush=True); p19_glossary1(c, sd);                                     c.showPage()
+    print("繪製 P20 術語解釋（下）…",     flush=True); p20_glossary2(c, sd);                                     c.showPage()
 
     c.save()
     print(f"\n✓ PDF 已生成：{output}  （20頁）")
